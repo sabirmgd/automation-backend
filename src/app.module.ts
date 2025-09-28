@@ -10,6 +10,8 @@ import { ProjectsModule } from './projects/projects.module';
 import { GitModule } from './git/git.module';
 import { JiraModule } from './modules/jira/jira.module';
 import { TasksModule } from './tasks/tasks.module';
+import { CronsModule } from './crons/crons.module';
+import { CommandModule } from './clients/command/command.module';
 import configuration from './config';
 import { validationSchema } from './config/validation.schema';
 
@@ -34,12 +36,14 @@ import { validationSchema } from './config/validation.schema';
       inject: [ConfigService],
     }),
     CommonModule,
+    CommandModule,
     AuthModule,
     ClientsModule,
     ProjectsModule,
     GitModule,
     JiraModule,
     TasksModule,
+    CronsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

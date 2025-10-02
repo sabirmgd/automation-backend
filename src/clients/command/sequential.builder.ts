@@ -63,6 +63,16 @@ export class SequentialCommandBuilder {
     return this;
   }
 
+  withShell(shell: boolean | string = true): this {
+    this.options.shell = shell;
+    return this;
+  }
+
+  withEncoding(encoding: BufferEncoding): this {
+    this.options.encoding = encoding;
+    return this;
+  }
+
   onlyIf(condition: () => boolean | Promise<boolean>): this {
     this.options.condition = condition;
     return this;
@@ -90,18 +100,15 @@ export class SequentialCommandBuilder {
       }
     }
 
-    if (this.options.onStart) {
-      this.options.onStart();
-    }
+    // Let strategy handle onStart per process
 
     for (let i = 0; i < this.commands.length; i++) {
       const command = this.commands[i];
       let actualCommand = command;
 
-      // If piping output, append previous output as input
+      // If piping output, pass previous output via stdin instead of shell echo
       if (this.passOutput && previousOutput && i > 0) {
-        // This is a simplified approach - in production, you'd use proper piping
-        actualCommand = `echo "${previousOutput.replace(/"/g, '\\"')}" | ${command}`;
+        this.options.input = previousOutput;
       }
 
       try {
@@ -158,9 +165,7 @@ export class SequentialCommandBuilder {
       }
     }
 
-    if (this.options.onComplete) {
-      results.forEach(result => this.options.onComplete?.(result));
-    }
+    // Let strategy handle onComplete per process
 
     return results;
   }

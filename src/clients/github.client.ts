@@ -225,8 +225,16 @@ export class GithubClient implements OnModuleInit {
     }
   }
 
-  async getWorkflowRuns(owner: string, repo: string, workflowId?: number) {
+  async getWorkflowRuns(owner: string, repo: string, workflowId?: number, token?: string) {
     try {
+      // Use provided token if available
+      let octokit = this.octokit;
+      if (token) {
+        const { getOctokit } = await import('./octokit.wrapper');
+        const Octokit = await getOctokit();
+        octokit = new Octokit({ auth: token });
+      }
+
       const params: any = {
         owner,
         repo,
@@ -237,7 +245,7 @@ export class GithubClient implements OnModuleInit {
         params.workflow_id = workflowId;
       }
 
-      const { data } = await this.octokit.actions.listWorkflowRuns(params);
+      const { data } = await octokit.actions.listWorkflowRuns(params);
 
       return data.workflow_runs.map((run: any) => ({
         id: run.id,
@@ -258,6 +266,104 @@ export class GithubClient implements OnModuleInit {
         `Failed to fetch workflow runs for ${owner}/${repo}`,
         error,
       );
+      throw error;
+    }
+  }
+
+  async getWorkflowRun(owner: string, repo: string, runId: number, token?: string) {
+    try {
+      let octokit = this.octokit;
+      if (token) {
+        const { getOctokit } = await import('./octokit.wrapper');
+        const Octokit = await getOctokit();
+        octokit = new Octokit({ auth: token });
+      }
+
+      const { data } = await octokit.actions.getWorkflowRun({
+        owner,
+        repo,
+        run_id: runId,
+      });
+
+      return {
+        id: data.id,
+        name: data.name,
+        status: data.status,
+        conclusion: data.conclusion,
+        workflowId: data.workflow_id,
+        branch: data.head_branch,
+        event: data.event,
+        sha: data.head_sha,
+        runNumber: data.run_number,
+        createdAt: data.created_at,
+        updatedAt: data.updated_at,
+        url: data.html_url,
+        jobs_url: data.jobs_url,
+        logs_url: data.logs_url,
+      };
+    } catch (error) {
+      this.logger.error(`Failed to fetch workflow run ${runId}`, error);
+      throw error;
+    }
+  }
+
+  async getWorkflowRunJobs(owner: string, repo: string, runId: number, token?: string) {
+    try {
+      let octokit = this.octokit;
+      if (token) {
+        const { getOctokit } = await import('./octokit.wrapper');
+        const Octokit = await getOctokit();
+        octokit = new Octokit({ auth: token });
+      }
+
+      const { data } = await octokit.actions.listJobsForWorkflowRun({
+        owner,
+        repo,
+        run_id: runId,
+        per_page: 100,
+      });
+
+      return data.jobs.map((job: any) => ({
+        id: job.id,
+        name: job.name,
+        status: job.status,
+        conclusion: job.conclusion,
+        startedAt: job.started_at,
+        completedAt: job.completed_at,
+        steps: job.steps?.map((step: any) => ({
+          name: step.name,
+          status: step.status,
+          conclusion: step.conclusion,
+          number: step.number,
+        })),
+        runnerName: job.runner_name,
+        runnerGroup: job.runner_group,
+        labels: job.labels,
+      }));
+    } catch (error) {
+      this.logger.error(`Failed to fetch jobs for workflow run ${runId}`, error);
+      throw error;
+    }
+  }
+
+  async getJobLogs(owner: string, repo: string, jobId: number, token?: string): Promise<string> {
+    try {
+      let octokit = this.octokit;
+      if (token) {
+        const { getOctokit } = await import('./octokit.wrapper');
+        const Octokit = await getOctokit();
+        octokit = new Octokit({ auth: token });
+      }
+
+      const { data } = await octokit.actions.downloadJobLogsForWorkflowRun({
+        owner,
+        repo,
+        job_id: jobId,
+      });
+
+      return data as string;
+    } catch (error) {
+      this.logger.error(`Failed to fetch logs for job ${jobId}`, error);
       throw error;
     }
   }

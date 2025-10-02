@@ -61,6 +61,16 @@ export class ParallelCommandBuilder {
     return this;
   }
 
+  withShell(shell: boolean | string = true): this {
+    this.options.shell = shell;
+    return this;
+  }
+
+  withEncoding(encoding: BufferEncoding): this {
+    this.options.encoding = encoding;
+    return this;
+  }
+
   onlyIf(condition: () => boolean | Promise<boolean>): this {
     this.options.condition = condition;
     return this;
@@ -82,9 +92,7 @@ export class ParallelCommandBuilder {
       }
     }
 
-    if (this.options.onStart) {
-      this.options.onStart();
-    }
+    // Let strategy handle onStart per process
 
     // Execute all commands in parallel
     const promises = this.commands.map(command =>
@@ -115,10 +123,7 @@ export class ParallelCommandBuilder {
       failedCommands,
     };
 
-    if (this.options.onComplete) {
-      // Call onComplete for each result
-      results.forEach(result => this.options.onComplete?.(result));
-    }
+    // Let strategy handle onComplete per process
 
     return parallelResult;
   }
@@ -213,8 +218,10 @@ export class ParallelCommandBuilder {
   }
 
   private cancelRunningProcesses(processes: Map<string, Promise<CommandResult>>): void {
-    // In a real implementation, we would need a way to cancel running processes
-    // This would require tracking process IDs or using AbortController
-    processes.clear();
+    try {
+      this.executor.kill();
+    } finally {
+      processes.clear();
+    }
   }
 }

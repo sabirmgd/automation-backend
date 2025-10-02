@@ -9,6 +9,7 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { CronJob, CronJobStatus } from './entities/cron-job.entity';
+import { CronJobType } from './enums/cron-job-type.enum';
 import {
   CronJobExecution,
   ExecutionStatus,
@@ -43,6 +44,7 @@ export class CronsService {
 
     const cronJob = this.cronJobRepository.create({
       ...createCronDto,
+      jobType: createCronDto.jobType || CronJobType.GENERIC,
       status: createCronDto.isActive
         ? CronJobStatus.ACTIVE
         : CronJobStatus.INACTIVE,

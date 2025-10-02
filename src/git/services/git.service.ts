@@ -268,6 +268,7 @@ export class GitService {
     repository.description = updatedRepo.description;
     repository.defaultBranch = updatedRepo.defaultBranch;
     repository.visibility = updatedRepo.visibility;
+    repository.namespace = updatedRepo.namespace;  // Ensure namespace is synced
     repository.metadata = updatedRepo.metadata;
     repository.lastSyncedAt = new Date();
 

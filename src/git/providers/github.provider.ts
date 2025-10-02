@@ -798,11 +798,11 @@ export class GitHubProvider implements IGitProvider {
         title: pr.title,
         description: pr.body,
         state: pr.state === 'open' ? 'open' : pr.merged ? 'merged' : 'closed',
-        sourceBranch: pr.head.ref,
-        targetBranch: pr.base.ref,
+        sourceBranch: pr.head?.ref || `deleted-branch-${pr.number}`,
+        targetBranch: pr.base?.ref || 'main',
         author: {
-          username: pr.user.login,
-          avatarUrl: pr.user.avatar_url,
+          username: pr.user?.login || 'unknown',
+          avatarUrl: pr.user?.avatar_url || '',
         },
         createdAt: new Date(pr.created_at),
         updatedAt: new Date(pr.updated_at),
@@ -1255,4 +1255,5 @@ export class GitHubProvider implements IGitProvider {
     };
     return repo;
   }
+
 }

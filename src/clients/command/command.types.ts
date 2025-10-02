@@ -57,6 +57,7 @@ export interface CommandBuilderOptions extends CommandOptions {
   condition?: () => boolean | Promise<boolean>;
   validateOutput?: (result: CommandResult) => boolean;
   parseOutput?: (stdout: string) => any;
+  input?: string | Buffer;
 }
 
 export interface CommandTemplate {

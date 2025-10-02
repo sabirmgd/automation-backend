@@ -10,9 +10,9 @@ services:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_DB: ${DB_DATABASE}
     ports:
-      - "${DB_PORT}:5432"
+      - "54789:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data_v16:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d
     networks:
       - automation_network
@@ -42,7 +42,7 @@ services:
       - postgres
 
 volumes:
-  postgres_data:
+  postgres_data_v16:
     driver: local
   pgadmin_data:
     driver: local

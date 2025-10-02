@@ -4,30 +4,45 @@ import { CommandBuilderOptions, CommandResult, CommandExecutionError } from '../
 
 export class SpawnStrategy extends ExecutionStrategy {
   private activeProcess: ChildProcess | null = null;
+  private activeProcesses: Set<ChildProcess> = new Set();
 
   async execute(command: string, options: CommandBuilderOptions): Promise<CommandResult> {
     this.startTime = Date.now();
     const sanitizedCommand = this.sanitizeCommand(command);
 
     return new Promise((resolve, reject) => {
-      const [cmd, ...args] = this.parseCommand(sanitizedCommand);
+      const useShell = options.shell ?? false;
+      const encoding: BufferEncoding = options.encoding || 'utf8';
+
+      let cmd: string;
+      let args: string[] = [];
+      if (useShell) {
+        // Let the shell parse the full command string
+        cmd = sanitizedCommand;
+      } else {
+        const parsed = this.parseCommand(sanitizedCommand);
+        cmd = parsed[0];
+        args = parsed.slice(1);
+      }
 
       const spawnOptions = {
         cwd: options.cwd || process.cwd(),
         env: this.mergeEnvironment(options.env),
-        shell: options.shell !== false,
+        shell: useShell,
         windowsHide: options.windowsHide,
-        encoding: options.encoding || 'utf8' as BufferEncoding,
         uid: options.uid,
         gid: options.gid,
       };
 
       this.activeProcess = spawn(cmd, args, spawnOptions);
+      const currentProcess = this.activeProcess;
+      this.activeProcesses.add(currentProcess);
 
       let stdout = '';
       let stderr = '';
       let killed = false;
       let timedOut = false;
+      let bufferExceeded = false;
       let timeoutHandle: NodeJS.Timeout | null = null;
 
       // Handle timeout
@@ -35,9 +50,7 @@ export class SpawnStrategy extends ExecutionStrategy {
         timeoutHandle = setTimeout(() => {
           timedOut = true;
           killed = true;
-          if (this.activeProcess) {
-            this.activeProcess.kill(options.killSignal || 'SIGTERM');
-          }
+          currentProcess.kill(options.killSignal || 'SIGTERM');
         }, options.timeout);
       }
 
@@ -47,9 +60,16 @@ export class SpawnStrategy extends ExecutionStrategy {
       }
 
       // Handle stdout
-      this.activeProcess.stdout?.on('data', (data: Buffer) => {
-        const chunk = data.toString();
+      currentProcess.stdout?.on('data', (data: Buffer) => {
+        const chunk = data.toString(encoding);
         stdout += chunk;
+
+        if (options.maxBuffer && (stdout.length + stderr.length) > options.maxBuffer) {
+          bufferExceeded = true;
+          killed = true;
+          currentProcess.kill(options.killSignal || 'SIGTERM');
+          return;
+        }
 
         if (options.streamOutput) {
           options.streamOutput(chunk, 'stdout');
@@ -68,19 +88,40 @@ export class SpawnStrategy extends ExecutionStrategy {
       });
 
       // Handle stderr
-      this.activeProcess.stderr?.on('data', (data: Buffer) => {
-        const chunk = data.toString();
+      currentProcess.stderr?.on('data', (data: Buffer) => {
+        const chunk = data.toString(encoding);
         stderr += chunk;
+
+        if (options.maxBuffer && (stdout.length + stderr.length) > options.maxBuffer) {
+          bufferExceeded = true;
+          killed = true;
+          currentProcess.kill(options.killSignal || 'SIGTERM');
+          return;
+        }
 
         if (options.streamOutput) {
           options.streamOutput(chunk, 'stderr');
         }
       });
 
+      // Provide stdin if input specified
+      if (options.input !== undefined && currentProcess.stdin) {
+        try {
+          currentProcess.stdin.write(options.input);
+        } catch {}
+        try {
+          currentProcess.stdin.end();
+        } catch {}
+      }
+
       // Handle process close
-      this.activeProcess.on('close', (code, signal) => {
+      currentProcess.on('close', (code, signal) => {
         if (timeoutHandle) {
           clearTimeout(timeoutHandle);
+        }
+
+        if (bufferExceeded) {
+          stderr = `${stderr}\n[maxBuffer exceeded]`;
         }
 
         const result = this.createResult(
@@ -113,6 +154,8 @@ export class SpawnStrategy extends ExecutionStrategy {
           }
 
           reject(error);
+          this.activeProcesses.delete(currentProcess);
+          this.activeProcess = null;
           return;
         }
 
@@ -148,11 +191,12 @@ export class SpawnStrategy extends ExecutionStrategy {
           resolve(result);
         }
 
+        this.activeProcesses.delete(currentProcess);
         this.activeProcess = null;
       });
 
       // Handle process error
-      this.activeProcess.on('error', (error) => {
+      currentProcess.on('error', (error) => {
         if (timeoutHandle) {
           clearTimeout(timeoutHandle);
         }
@@ -170,6 +214,7 @@ export class SpawnStrategy extends ExecutionStrategy {
         }
 
         reject(executionError);
+        this.activeProcesses.delete(currentProcess);
         this.activeProcess = null;
       });
     });
@@ -182,8 +227,16 @@ export class SpawnStrategy extends ExecutionStrategy {
       } catch (error) {
         console.error(`Failed to kill process ${pid}:`, error);
       }
-    } else if (this.activeProcess && !this.activeProcess.killed) {
-      this.activeProcess.kill('SIGTERM');
+      return;
+    }
+
+    // Kill all tracked processes
+    for (const child of Array.from(this.activeProcesses)) {
+      try {
+        if (!child.killed) child.kill('SIGTERM');
+      } catch (error) {
+        console.error('Failed to kill process:', error);
+      }
     }
   }
 

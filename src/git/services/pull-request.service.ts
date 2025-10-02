@@ -1,9 +1,10 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, Inject, forwardRef } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import { PullRequest, PullRequestStatus } from '../entities/pull-request.entity';
 import { JiraTicket } from '../../modules/jira/entities/jira-ticket.entity';
 import { GitRepository } from '../entities/git-repository.entity';
+import { GitService } from './git.service';
 
 interface PullRequestFilters {
   repositoryId?: string;
@@ -11,7 +12,7 @@ interface PullRequestFilters {
   authorUsername?: string;
 }
 
-interface SyncResult {
+export interface SyncResult {
   created: number;
   updated: number;
 }
@@ -24,7 +25,9 @@ export class PullRequestService {
     @InjectRepository(JiraTicket)
     private readonly jiraTicketRepository: Repository<JiraTicket>,
     @InjectRepository(GitRepository)
-    private readonly gitRepositoryRepository: Repository<GitRepository>
+    private readonly gitRepositoryRepository: Repository<GitRepository>,
+    @Inject(forwardRef(() => GitService))
+    private readonly gitService: any
   ) {}
 
   async create(repositoryId: string, pullRequestData: Partial<PullRequest>): Promise<PullRequest> {
@@ -220,6 +223,68 @@ export class PullRequestService {
 
     if (result.affected === 0) {
       throw new NotFoundException(`Pull request with ID ${id} not found`);
+    }
+  }
+
+  async syncRepositoryPullRequests(repositoryId: string): Promise<SyncResult> {
+    try {
+      console.log(`[PullRequestService] Syncing PRs for repository ${repositoryId}`);
+
+      // Fetch PRs from GitHub/GitLab using injected GitService
+      const remotePRs = await this.gitService.getPullRequests(repositoryId, 'all');
+
+      console.log(`[PullRequestService] Fetched ${remotePRs.length} PRs from GitHub`);
+
+      if (!remotePRs || remotePRs.length === 0) {
+        return { created: 0, updated: 0 };
+      }
+
+      // Transform GitHub/GitLab PR data to our database schema
+      const transformedPRs = remotePRs.map(pr => {
+        // Debug log to see what we're getting
+        if (!pr.sourceBranch) {
+          console.log(`[PullRequestService] PR #${pr.number} missing sourceBranch:`, pr);
+        }
+
+        return {
+          remoteId: pr.id?.toString() || pr.number?.toString(),
+          number: pr.number,
+          title: pr.title,
+          description: pr.body || pr.description || '',
+          // Don't set 'state' - it's for review state (approved, changes_requested, etc)
+          status: pr.state === 'open' ? PullRequestStatus.OPEN :
+                  pr.state === 'merged' ? PullRequestStatus.MERGED :
+                  PullRequestStatus.CLOSED,
+          sourceBranch: pr.sourceBranch || 'unknown',
+          targetBranch: pr.targetBranch || 'main',
+          authorUsername: pr.author?.username || 'unknown',
+          authorAvatarUrl: pr.author?.avatarUrl || '',
+          url: pr.url || '',
+          createdAt: pr.createdAt,
+          updatedAt: pr.updatedAt,
+          mergedAt: pr.mergedAt,
+          closedAt: pr.closedAt,
+          commitsCount: pr.commits || 0,
+          additions: pr.additions || 0,
+          deletions: pr.deletions || 0,
+          changedFiles: pr.changedFiles || 0,
+          commentsCount: pr.comments || 0,
+          reviewCommentsCount: pr.reviewComments || 0,
+          metadata: {
+            mergeable: pr.mergeable,
+            draft: pr.draft,
+            labels: pr.labels,
+          },
+        };
+      });
+
+      // Sync transformed PRs to database
+      const result = await this.syncFromRemote(repositoryId, transformedPRs);
+      console.log(`[PullRequestService] Sync result:`, result);
+      return result;
+    } catch (error: any) {
+      console.error(`[PullRequestService] Error syncing PRs:`, error.message);
+      return { created: 0, updated: 0 };
     }
   }
 }

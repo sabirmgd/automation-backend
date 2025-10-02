@@ -12,6 +12,7 @@ import { JiraModule } from './modules/jira/jira.module';
 import { TasksModule } from './tasks/tasks.module';
 import { CronsModule } from './crons/crons.module';
 import { CommandModule } from './clients/command/command.module';
+import { CredentialsModule } from './credentials/credentials.module';
 import configuration from './config';
 import { validationSchema } from './config/validation.schema';
 
@@ -30,9 +31,15 @@ import { validationSchema } from './config/validation.schema';
     }),
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        ...configService.get('database'),
-      }),
+      useFactory: (configService: ConfigService) => {
+        const dbConfig = configService.get('database');
+        console.log('Database Config:', {
+          ...dbConfig,
+          password: dbConfig.password ? `[${dbConfig.password.length} chars]` : 'undefined'
+        });
+        console.log('Actual password:', dbConfig.password);
+        return dbConfig;
+      },
       inject: [ConfigService],
     }),
     CommonModule,
@@ -41,6 +48,7 @@ import { validationSchema } from './config/validation.schema';
     ClientsModule,
     ProjectsModule,
     GitModule,
+    CredentialsModule,
     JiraModule,
     TasksModule,
     CronsModule,

@@ -68,15 +68,18 @@ export class CommandClient implements ICommandExecutor {
 
       return result;
     } catch (error) {
-      // Store failed execution in history
+      const err = error as any;
       const failedResult: CommandResult = {
         success: false,
-        exitCode: (error as any).exitCode || 1,
-        stdout: (error as any).stdout || '',
-        stderr: (error as any).stderr || (error as Error).message,
+        exitCode: typeof err.exitCode === 'number' ? err.exitCode : null,
+        stdout: typeof err.stdout === 'string' ? err.stdout : '',
+        stderr: typeof err.stderr === 'string' ? err.stderr : (err.message || 'Command failed'),
         duration: Date.now() - startTime,
         command,
-        killed: false,
+        killed: !!err.killed,
+        signal: err.signal,
+        timedOut: !!err.timedOut,
+        metadata: { errorName: err.name },
       };
 
       this.addToHistory(command, options, failedResult);
@@ -94,12 +97,54 @@ export class CommandClient implements ICommandExecutor {
     options: CommandBuilderOptions,
   ): Promise<CommandResult[] | ParallelResult> {
     switch (mode) {
-      case ExecutionMode.PARALLEL:
-        return this.parallel(commands).run();
-      case ExecutionMode.SEQUENTIAL:
-        return this.sequence(commands).run();
-      case ExecutionMode.PIPE:
-        return this.pipe(commands).run();
+      case ExecutionMode.PARALLEL: {
+        const builder = this.parallel(commands);
+        if (options.cwd) builder.inDirectory(options.cwd);
+        if (options.timeout) builder.withTimeout(options.timeout);
+        if (options.env) builder.withEnv(options.env);
+        if (options.shell !== undefined) builder.withShell(options.shell);
+        if (options.encoding) builder.withEncoding(options.encoding);
+        if (options.streamOutput) builder.streamOutput(options.streamOutput);
+        if (options.onProgress) builder.onProgress(options.onProgress);
+        if (options.onStart) builder.onStart(options.onStart);
+        if (options.onComplete) builder.onComplete(options.onComplete);
+        if (options.onError) builder.onError(options.onError);
+        if (options.retry) builder.withRetry(options.retry);
+        if (options.condition) builder.onlyIf(options.condition);
+        return builder.run();
+      }
+      case ExecutionMode.SEQUENTIAL: {
+        const builder = this.sequence(commands);
+        if (options.cwd) builder.inDirectory(options.cwd);
+        if (options.timeout) builder.withTimeout(options.timeout);
+        if (options.env) builder.withEnv(options.env);
+        if (options.shell !== undefined) builder.withShell(options.shell);
+        if (options.encoding) builder.withEncoding(options.encoding);
+        if (options.streamOutput) builder.streamOutput(options.streamOutput);
+        if (options.onProgress) builder.onProgress(options.onProgress);
+        if (options.onStart) builder.onStart(options.onStart);
+        if (options.onComplete) builder.onComplete(options.onComplete);
+        if (options.onError) builder.onError(options.onError);
+        if (options.retry) builder.withRetry(options.retry);
+        if (options.condition) builder.onlyIf(options.condition);
+        return builder.run();
+      }
+      case ExecutionMode.PIPE: {
+        const builder = this.sequence(commands).pipeOutput();
+        if (options.cwd) builder.inDirectory(options.cwd);
+        if (options.timeout) builder.withTimeout(options.timeout);
+        if (options.env) builder.withEnv(options.env);
+        if (options.shell !== undefined) builder.withShell(options.shell);
+        if (options.encoding) builder.withEncoding(options.encoding);
+        if (options.streamOutput) builder.streamOutput(options.streamOutput);
+        if (options.onProgress) builder.onProgress(options.onProgress);
+        if (options.onStart) builder.onStart(options.onStart);
+        if (options.onComplete) builder.onComplete(options.onComplete);
+        if (options.onError) builder.onError(options.onError);
+        if (options.retry) builder.withRetry(options.retry);
+        if (options.condition) builder.onlyIf(options.condition);
+        return builder.run();
+      }
       default:
         throw new Error(`Unknown execution mode: ${mode}`);
     }
@@ -177,6 +222,15 @@ export class CommandClient implements ICommandExecutor {
     if (options?.cwd) builder.inDirectory(options.cwd);
     if (options?.timeout) builder.withTimeout(options.timeout);
     if (options?.env) builder.withEnv(options.env);
+    if (options?.shell !== undefined) builder.withShell(options.shell);
+    if (options?.encoding) builder.withEncoding(options.encoding);
+    if (options?.streamOutput) builder.streamOutput(options.streamOutput);
+    if (options?.onProgress) builder.onProgress(options.onProgress);
+    if (options?.onStart) builder.onStart(options.onStart);
+    if (options?.onComplete) builder.onComplete(options.onComplete);
+    if (options?.onError) builder.onError(options.onError);
+    if (options?.retry) builder.withRetry(options.retry);
+    if (options?.condition) builder.onlyIf(options.condition);
 
     return builder.run();
   }
@@ -194,8 +248,10 @@ export class CommandClient implements ICommandExecutor {
    */
   async commandExists(command: string): Promise<boolean> {
     try {
-      const result = await this.exec(`which ${command}`, { timeout: 5000 });
-      return result.success && result.stdout.trim() !== '';
+      const isWindows = process.platform === 'win32';
+      const checkCmd = isWindows ? `where ${command}` : `command -v ${command}`;
+      const result = await this.exec(checkCmd, { timeout: 5000, shell: true });
+      return result.success && result.stdout.trim() !== '' && !/not found|could not be found/i.test(result.stderr);
     } catch {
       return false;
     }

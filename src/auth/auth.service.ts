@@ -9,3 +9,4 @@ export class AuthService {
     return { userId: payload.sub, username: payload.username };
   }
 }
+

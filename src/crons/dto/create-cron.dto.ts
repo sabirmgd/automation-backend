@@ -4,9 +4,11 @@ import {
   IsBoolean,
   IsUUID,
   IsObject,
+  IsEnum,
   MinLength,
   MaxLength,
 } from 'class-validator';
+import { CronJobType } from '../enums/cron-job-type.enum';
 
 export class CreateCronDto {
   @IsString()
@@ -20,6 +22,10 @@ export class CreateCronDto {
 
   @IsString()
   cronExpression: string;
+
+  @IsEnum(CronJobType)
+  @IsOptional()
+  jobType?: CronJobType;
 
   @IsBoolean()
   @IsOptional()

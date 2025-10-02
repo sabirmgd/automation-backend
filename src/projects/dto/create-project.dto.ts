@@ -49,7 +49,6 @@ export class CreateProjectDto {
 
   @IsOptional()
   @IsString()
-  @MinLength(1)
   @MaxLength(36)
   key?: string;
 

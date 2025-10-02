@@ -12,6 +12,7 @@ import { JiraAccountService } from './services/jira-account.service';
 import { JiraTicketService } from './services/jira-ticket.service';
 import { TicketAnalysisService } from './services/ticket-analysis.service';
 import { JiraSyncService } from './services/jira-sync.service';
+import { JiraBoardService } from './services/jira-board.service';
 import { JiraAccountController } from './controllers/jira-account.controller';
 import { JiraTicketController } from './controllers/jira-ticket.controller';
 import { TicketAnalysisController } from './controllers/ticket-analysis.controller';
@@ -38,6 +39,7 @@ import { EncryptionService } from '../../common/services/encryption.service';
     JiraTicketService,
     TicketAnalysisService,
     JiraSyncService,
+    JiraBoardService,
     EncryptionService,
   ],
   exports: [
@@ -45,6 +47,7 @@ import { EncryptionService } from '../../common/services/encryption.service';
     JiraTicketService,
     TicketAnalysisService,
     JiraSyncService,
+    JiraBoardService,
   ],
 })
 export class JiraModule {}

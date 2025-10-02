@@ -31,7 +31,7 @@ export class JiraSyncService {
       host: account.jiraUrl.replace(/^https?:\/\//, ''),
       username: account.email,
       password: account.apiToken || account.encryptedApiToken,
-      apiVersion: '2',
+      apiVersion: '3',
       strictSSL: true,
     });
   }
@@ -141,16 +141,27 @@ export class JiraSyncService {
       const jql = `assignee = "${currentUser.accountId}" AND project = "${board.projectKey}"`;
       this.logger.log(`JQL Query: ${jql}`);
 
-      const issues = await client.searchJira(jql, {
-        maxResults: 100,
-        fields: [
-          'summary', 'status', 'assignee', 'reporter', 'priority',
-          'created', 'updated', 'description', 'issuetype', 'project',
-          'sprint', 'resolution', 'labels', 'components', 'parent',
-          'timeoriginalestimate', 'timeestimate', 'timespent', 'duedate',
-          'customfield_10016'
-        ]
-      });
+      // Use the new /search/jql endpoint directly
+      const issues = await client.doRequest(
+        client.makeRequestHeader(
+          client.makeUri({ pathname: '/search/jql' }),
+          {
+            method: 'POST',
+            followAllRedirects: true,
+            body: {
+              jql: jql,
+              maxResults: 100,
+              fields: [
+                'summary', 'status', 'assignee', 'reporter', 'priority',
+                'created', 'updated', 'description', 'issuetype', 'project',
+                'sprint', 'resolution', 'labels', 'components', 'parent',
+                'timeoriginalestimate', 'timeestimate', 'timespent', 'duedate',
+                'customfield_10016'
+              ]
+            }
+          }
+        )
+      );
 
       for (const issue of issues.issues) {
         await this.syncUser(issue.fields.assignee);

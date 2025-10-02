@@ -10,6 +10,7 @@ import {
 } from 'typeorm';
 import { Project } from '../../projects/project.entity';
 import { CronJobExecution } from './cron-job-execution.entity';
+import { CronJobType } from '../enums/cron-job-type.enum';
 
 export enum CronJobStatus {
   ACTIVE = 'active',
@@ -31,6 +32,13 @@ export class CronJob {
 
   @Column({ type: 'varchar', length: 255 })
   cronExpression: string;
+
+  @Column({
+    type: 'enum',
+    enum: CronJobType,
+    default: CronJobType.GENERIC,
+  })
+  jobType: CronJobType;
 
   @Column({
     type: 'enum',

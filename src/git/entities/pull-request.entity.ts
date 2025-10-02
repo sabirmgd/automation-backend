@@ -4,6 +4,7 @@ import {
   Column,
   ManyToOne,
   ManyToMany,
+  OneToMany,
   JoinColumn,
   JoinTable,
   CreateDateColumn,
@@ -12,6 +13,8 @@ import {
 } from 'typeorm';
 import { GitRepository } from './git-repository.entity';
 import { JiraTicket } from '../../modules/jira/entities/jira-ticket.entity';
+import { ReviewComment } from './review-comment.entity';
+import { Pipeline } from './pipeline.entity';
 
 export enum PullRequestStatus {
   OPEN = 'open',
@@ -146,6 +149,12 @@ export class PullRequest {
     inverseJoinColumn: { name: 'ticketId', referencedColumnName: 'id' },
   })
   linkedTickets: JiraTicket[];
+
+  @OneToMany(() => ReviewComment, (comment) => comment.pullRequest)
+  reviewComments: ReviewComment[];
+
+  @OneToMany(() => Pipeline, (pipeline) => pipeline.pullRequest)
+  pipelines: Pipeline[];
 
   @Column({ type: 'jsonb', nullable: true })
   metadata: {

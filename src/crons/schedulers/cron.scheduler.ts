@@ -1,7 +1,11 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/common';
 import { SchedulerRegistry } from '@nestjs/schedule';
 import { CronsService } from '../crons.service';
 import { CronJob, CronJobStatus } from '../entities/cron-job.entity';
+import { CronJobType, JiraSyncMode } from '../enums/cron-job-type.enum';
+import { JiraSyncService } from '../../modules/jira/services/jira-sync.service';
+import { JiraBoardService } from '../../modules/jira/services/jira-board.service';
+import { JiraAccountService } from '../../modules/jira/services/jira-account.service';
 
 @Injectable()
 export class CronScheduler implements OnModuleInit {
@@ -10,6 +14,12 @@ export class CronScheduler implements OnModuleInit {
   constructor(
     private schedulerRegistry: SchedulerRegistry,
     private cronsService: CronsService,
+    @Inject(forwardRef(() => JiraSyncService))
+    private jiraSyncService: JiraSyncService,
+    @Inject(forwardRef(() => JiraBoardService))
+    private jiraBoardService: JiraBoardService,
+    @Inject(forwardRef(() => JiraAccountService))
+    private jiraAccountService: JiraAccountService,
   ) {
     // Set the reference to this scheduler in the service
     this.cronsService.setCronScheduler(this);
@@ -125,22 +135,42 @@ export class CronScheduler implements OnModuleInit {
 
     try {
       const timestamp = new Date().toISOString();
-      const output = `[${timestamp}] Cron job "${cronJob.name}" executed successfully`;
+      let output: string;
+      let executionResult: { success: boolean; message: string; details?: any };
+
+      // Execute based on job type
+      switch (cronJob.jobType) {
+        case CronJobType.JIRA_SYNC:
+          executionResult = await this.executeJiraSyncJob(cronJob);
+          output = `[${timestamp}] ${executionResult.message}`;
+          break;
+
+        case CronJobType.GENERIC:
+        default:
+          output = `[${timestamp}] Cron job "${cronJob.name}" executed successfully`;
+          executionResult = { success: true, message: output };
+
+          if (cronJob.metadata?.action) {
+            console.log(
+              `[${timestamp}] Action: ${cronJob.metadata.action}`,
+            );
+          }
+
+          if (cronJob.projectId) {
+            console.log(
+              `[${timestamp}] Associated with project: ${cronJob.projectId}`,
+            );
+          }
+          break;
+      }
+
       console.log(output);
-
-      if (cronJob.metadata?.action) {
-        console.log(
-          `[${timestamp}] Action: ${cronJob.metadata.action}`,
-        );
-      }
-
-      if (cronJob.projectId) {
-        console.log(
-          `[${timestamp}] Associated with project: ${cronJob.projectId}`,
-        );
-      }
-
-      await this.cronsService.completeExecution(execution.id, true, output);
+      await this.cronsService.completeExecution(
+        execution.id,
+        executionResult.success,
+        output,
+        executionResult.success ? null : executionResult.message,
+      );
     } catch (error) {
       this.logger.error(
         `Failed to execute cron job ${cronJob.name}`,
@@ -167,6 +197,115 @@ export class CronScheduler implements OnModuleInit {
         error,
       );
       throw error;
+    }
+  }
+
+  private async executeJiraSyncJob(cronJob: CronJob): Promise<{
+    success: boolean;
+    message: string;
+    details?: any;
+  }> {
+    const metadata = cronJob.metadata as {
+      syncMode: JiraSyncMode;
+      boardId?: string;
+      accountId?: string;
+      jql?: string;
+      options?: {
+        clearExisting?: boolean;
+        syncComments?: boolean;
+        syncAttachments?: boolean;
+      };
+    };
+
+    if (!metadata?.syncMode) {
+      return {
+        success: false,
+        message: 'Jira sync job missing syncMode configuration',
+      };
+    }
+
+    try {
+      let syncResults: any[] = [];
+
+      switch (metadata.syncMode) {
+        case JiraSyncMode.SINGLE_BOARD:
+          if (!metadata.boardId) {
+            return {
+              success: false,
+              message: 'Board ID required for single board sync mode',
+            };
+          }
+
+          this.logger.log(`Syncing Jira board: ${metadata.boardId}`);
+          await this.jiraSyncService.syncBoardTickets(metadata.boardId);
+          syncResults.push({ boardId: metadata.boardId, status: 'synced' });
+          break;
+
+        case JiraSyncMode.ALL_BOARDS:
+          this.logger.log('Syncing all Jira boards');
+          const boards = await this.jiraBoardService.findAll();
+
+          for (const board of boards) {
+            try {
+              await this.jiraSyncService.syncBoardTickets(board.id);
+              syncResults.push({ boardId: board.id, boardName: board.name, status: 'synced' });
+            } catch (error) {
+              this.logger.error(`Failed to sync board ${board.id}:`, error);
+              syncResults.push({ boardId: board.id, boardName: board.name, status: 'failed', error: error.message });
+            }
+          }
+          break;
+
+        case JiraSyncMode.BY_ACCOUNT:
+          if (!metadata.accountId) {
+            return {
+              success: false,
+              message: 'Account ID required for account sync mode',
+            };
+          }
+
+          this.logger.log(`Syncing Jira account: ${metadata.accountId}`);
+          await this.jiraSyncService.syncAccount(metadata.accountId);
+          syncResults.push({ accountId: metadata.accountId, status: 'synced' });
+          break;
+
+        case JiraSyncMode.CUSTOM_JQL:
+          if (!metadata.jql || !metadata.accountId) {
+            return {
+              success: false,
+              message: 'JQL query and account ID required for custom JQL sync mode',
+            };
+          }
+
+          this.logger.log(`Syncing with custom JQL: ${metadata.jql}`);
+          // This would need to be implemented in JiraSyncService
+          // await this.jiraSyncService.syncByJql(metadata.accountId, metadata.jql, metadata.options);
+          return {
+            success: false,
+            message: 'Custom JQL sync not yet implemented',
+          };
+
+        default:
+          return {
+            success: false,
+            message: `Unknown sync mode: ${metadata.syncMode}`,
+          };
+      }
+
+      const successCount = syncResults.filter(r => r.status === 'synced').length;
+      const failureCount = syncResults.filter(r => r.status === 'failed').length;
+
+      return {
+        success: failureCount === 0,
+        message: `Jira sync completed: ${successCount} successful, ${failureCount} failed`,
+        details: syncResults,
+      };
+    } catch (error) {
+      this.logger.error(`Jira sync job failed:`, error);
+      return {
+        success: false,
+        message: `Jira sync failed: ${error.message}`,
+      };
     }
   }
 }

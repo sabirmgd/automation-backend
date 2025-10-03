@@ -6,6 +6,7 @@ import {
   UpdateDateColumn,
   OneToMany,
 } from 'typeorm';
+import { Prompt } from '../prompts/prompt.entity';
 // TODO: Uncomment when entities are available
 // import { JiraAccount } from '../modules/jira/entities/jira-account.entity';
 // import { GitRepository } from '../git/entities/git-repository.entity';
@@ -56,6 +57,12 @@ export class Project {
 
   @Column({ type: 'simple-array', nullable: true })
   tags: string[];
+
+  @Column({ type: 'text', nullable: true })
+  agentNavigationInfo: string;
+
+  @OneToMany(() => Prompt, (prompt) => prompt.project)
+  prompts: Prompt[];
 
   // TODO: Uncomment when entities are available
   // @OneToMany(() => JiraAccount, (jiraAccount) => jiraAccount.project)

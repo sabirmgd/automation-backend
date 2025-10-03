@@ -10,7 +10,6 @@ import {
   HttpStatus,
   Query,
   ValidationPipe,
-  ParseIntPipe,
 } from '@nestjs/common';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
@@ -47,13 +46,13 @@ export class ProjectsController {
   }
 
   @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: string) {
+  findOne(@Param('id') id: string) {
     return this.projectsService.findOne(id);
   }
 
   @Patch(':id')
   update(
-    @Param('id', ParseIntPipe) id: string,
+    @Param('id') id: string,
     @Body(ValidationPipe) updateProjectDto: UpdateProjectDto,
   ) {
     return this.projectsService.update(id, updateProjectDto);
@@ -61,7 +60,7 @@ export class ProjectsController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  remove(@Param('id', ParseIntPipe) id: string) {
+  remove(@Param('id') id: string) {
     return this.projectsService.remove(id);
   }
 

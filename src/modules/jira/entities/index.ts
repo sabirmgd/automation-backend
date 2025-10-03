@@ -8,3 +8,4 @@ export {
   AnalysisType,
   AnalysisStatus,
 } from './ticket-analysis.entity';
+export { HiddenComment, AuthorType } from './hidden-comment.entity';

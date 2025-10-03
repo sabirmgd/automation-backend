@@ -20,6 +20,7 @@
     "test:e2e": "jest --config ./test/jest-e2e.json"
   },
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.1.5",
     "@anthropic-ai/sdk": "^0.24.3",
     "@gitbeaker/rest": "^40.0.3",
     "@langchain/anthropic": "^0.3.30",

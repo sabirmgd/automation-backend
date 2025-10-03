@@ -7,15 +7,20 @@ import {
   JiraUser,
   JiraProject,
   TicketAnalysis,
+  HiddenComment,
 } from './entities';
 import { JiraAccountService } from './services/jira-account.service';
 import { JiraTicketService } from './services/jira-ticket.service';
 import { TicketAnalysisService } from './services/ticket-analysis.service';
 import { JiraSyncService } from './services/jira-sync.service';
 import { JiraBoardService } from './services/jira-board.service';
+import { HiddenCommentService } from './services/hidden-comment.service';
 import { JiraAccountController } from './controllers/jira-account.controller';
 import { JiraTicketController } from './controllers/jira-ticket.controller';
 import { TicketAnalysisController } from './controllers/ticket-analysis.controller';
+import { HiddenCommentController } from './controllers/hidden-comment.controller';
+import { TicketImproverController } from './controllers/ticket-improver.controller';
+import { JiraImproverAgentService } from '../../agents/jira-improver/agent.service';
 import { EncryptionService } from '../../common/services/encryption.service';
 
 @Module({
@@ -27,12 +32,15 @@ import { EncryptionService } from '../../common/services/encryption.service';
       JiraUser,
       JiraProject,
       TicketAnalysis,
+      HiddenComment,
     ]),
   ],
   controllers: [
     JiraAccountController,
     JiraTicketController,
     TicketAnalysisController,
+    HiddenCommentController,
+    TicketImproverController,
   ],
   providers: [
     JiraAccountService,
@@ -40,6 +48,8 @@ import { EncryptionService } from '../../common/services/encryption.service';
     TicketAnalysisService,
     JiraSyncService,
     JiraBoardService,
+    HiddenCommentService,
+    JiraImproverAgentService,
     EncryptionService,
   ],
   exports: [
@@ -48,6 +58,7 @@ import { EncryptionService } from '../../common/services/encryption.service';
     TicketAnalysisService,
     JiraSyncService,
     JiraBoardService,
+    HiddenCommentService,
   ],
 })
 export class JiraModule {}

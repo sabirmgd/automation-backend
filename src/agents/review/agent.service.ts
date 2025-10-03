@@ -17,7 +17,7 @@ export class ReviewAgentService {
 
   private initializeModel() {
     this.model = new ChatAnthropic({
-      apiKey: this.configService.get<string>('ANTHROPIC_API_KEY'),
+      apiKey: this.configService.get<string>('COCO_API_KEY'),
       model: 'claude-opus-4-1-20250805',
       maxTokens: 30000,
       streaming: true, // Enable streaming to avoid timeout issues

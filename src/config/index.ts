@@ -36,7 +36,7 @@ export default [
       token: process.env.GITHUB_TOKEN,
     },
     anthropic: {
-      apiKey: process.env.ANTHROPIC_API_KEY,
+      apiKey: process.env.COCO_API_KEY,
     },
     encryption: {
       key: process.env.ENCRYPTION_KEY || 'default-32-character-encryption-key-change-this',

@@ -84,4 +84,9 @@ export class CreateProjectDto {
   @IsArray()
   @IsString({ each: true })
   tags?: string[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  agentNavigationInfo?: string;
 }

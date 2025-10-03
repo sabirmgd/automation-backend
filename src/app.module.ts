@@ -13,6 +13,8 @@ import { TasksModule } from './tasks/tasks.module';
 import { CronsModule } from './crons/crons.module';
 import { CommandModule } from './clients/command/command.module';
 import { CredentialsModule } from './credentials/credentials.module';
+import { PromptsModule } from './prompts/prompts.module';
+import { CodeModule } from './code/code.module';
 import configuration from './config';
 import { validationSchema } from './config/validation.schema';
 
@@ -47,11 +49,13 @@ import { validationSchema } from './config/validation.schema';
     AuthModule,
     ClientsModule,
     ProjectsModule,
+    PromptsModule,
     GitModule,
     CredentialsModule,
     JiraModule,
     TasksModule,
     CronsModule,
+    CodeModule,
   ],
   controllers: [AppController],
   providers: [AppService],

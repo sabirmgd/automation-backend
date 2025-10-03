@@ -15,7 +15,7 @@ export class DiagramAgentService {
 
   private initializeModel() {
     this.model = new ChatAnthropic({
-      apiKey: this.configService.get<string>('ANTHROPIC_API_KEY'),
+      apiKey: this.configService.get<string>('COCO_API_KEY'),
       model: 'claude-opus-4-1-20250805',
       temperature: 0.3,
       maxTokens: 10000,

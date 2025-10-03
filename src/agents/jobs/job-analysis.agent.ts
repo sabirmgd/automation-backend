@@ -22,7 +22,7 @@ export class JobAnalysisAgent {
 
   constructor(private readonly configService: ConfigService) {
     this.llm = new ChatAnthropic({
-      apiKey: this.configService.get<string>('ANTHROPIC_API_KEY'),
+      apiKey: this.configService.get<string>('COCO_API_KEY'),
       model: 'claude-opus-4-1-20250805',
       temperature: 0.1,
       maxTokens: 10000,

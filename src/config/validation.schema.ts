@@ -30,7 +30,7 @@ export const validationSchema = Joi.object({
 
   // External Services (optional)
   GITHUB_TOKEN: Joi.string().optional().allow(''),
-  ANTHROPIC_API_KEY: Joi.string().optional().allow(''),
+  COCO_API_KEY: Joi.string().optional().allow(''),
 
   // Encryption
   ENCRYPTION_KEY: Joi.string().min(32).required(),

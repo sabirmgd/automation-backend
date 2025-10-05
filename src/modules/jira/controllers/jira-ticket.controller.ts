@@ -69,9 +69,32 @@ export class JiraTicketController {
   }
 
   @Post('board/:boardId/sync')
-  async syncBoardTickets(@Param('boardId') boardId: string): Promise<{ message: string }> {
-    await this.jiraSyncService.syncBoardTickets(boardId);
-    return { message: 'Board tickets sync initiated successfully' };
+  async syncBoardTickets(
+    @Param('boardId') boardId: string,
+    @Body('assigneeAccountId') assigneeAccountId?: string,
+    @Body('syncMode') syncMode?: 'assigned' | 'all' | 'custom',
+    @Body('customJql') customJql?: string,
+  ): Promise<{ message: string }> {
+    await this.jiraSyncService.syncBoardTickets(boardId, assigneeAccountId, syncMode, customJql);
+    const syncInfo = syncMode === 'all'
+      ? ' for all tickets'
+      : assigneeAccountId
+        ? ` for assignee ${assigneeAccountId}`
+        : ' for current user';
+    return { message: `Board tickets sync initiated successfully${syncInfo}` };
+  }
+
+  @Post('key/:key/sync')
+  async syncTicketByKey(
+    @Param('key') key: string,
+    @Body('mainProjectId') mainProjectId?: string,
+    @Body('boardId') boardId?: string,
+  ): Promise<{ ticket: JiraTicket; message: string }> {
+    const ticket = await this.jiraSyncService.syncSingleTicket(key, mainProjectId, boardId);
+    return {
+      ticket,
+      message: `Ticket ${key} synced successfully`
+    };
   }
 
   @Get(':id/comments')

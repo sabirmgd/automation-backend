@@ -16,7 +16,10 @@ import { JiraSyncService } from './services/jira-sync.service';
 import { JiraBoardService } from './services/jira-board.service';
 import { HiddenCommentService } from './services/hidden-comment.service';
 import { JiraAccountController } from './controllers/jira-account.controller';
+import { JiraBoardController } from './controllers/jira-board.controller';
+import { JiraProjectController } from './controllers/jira-project.controller';
 import { JiraTicketController } from './controllers/jira-ticket.controller';
+import { JiraUserController } from './controllers/jira-user.controller';
 import { TicketAnalysisController } from './controllers/ticket-analysis.controller';
 import { HiddenCommentController } from './controllers/hidden-comment.controller';
 import { TicketImproverController } from './controllers/ticket-improver.controller';
@@ -37,7 +40,10 @@ import { EncryptionService } from '../../common/services/encryption.service';
   ],
   controllers: [
     JiraAccountController,
+    JiraBoardController,
+    JiraProjectController,
     JiraTicketController,
+    JiraUserController,
     TicketAnalysisController,
     HiddenCommentController,
     TicketImproverController,

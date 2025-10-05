@@ -116,7 +116,110 @@ export class JiraSyncService {
     }
   }
 
-  async syncBoardTickets(boardId: string): Promise<void> {
+  async syncProjectTickets(projectId: string, assigneeAccountId?: string): Promise<void> {
+    const project = await this.projectRepository.findOne({
+      where: { id: projectId },
+      relations: ['account', 'boards'],
+    });
+
+    if (!project) {
+      throw new Error(`Project ${projectId} not found`);
+    }
+
+    // Sync all boards in the project
+    for (const board of project.boards) {
+      await this.syncBoardTickets(board.id, assigneeAccountId);
+    }
+  }
+
+  async syncSingleTicket(key: string, mainProjectId?: string, boardId?: string): Promise<any> {
+    // Find any board that can access this ticket
+    let board: JiraBoard | null = null;
+
+    if (boardId) {
+      board = await this.boardRepository.findOne({
+        where: { id: boardId },
+        relations: ['account'],
+      });
+    } else {
+      // Find a board that might contain this ticket based on project key
+      const projectKey = key.split('-')[0];
+      board = await this.boardRepository.findOne({
+        where: { projectKey },
+        relations: ['account'],
+      });
+    }
+
+    if (!board) {
+      throw new Error(`No board found to sync ticket ${key}`);
+    }
+
+    const account = await this.accountService.getDecryptedAccount(board.account.id);
+    const client = this.getJiraClient(account);
+
+    this.logger.log(`Syncing single ticket ${key}`);
+
+    try {
+      // Fetch the specific ticket
+      const issue = await client.findIssue(key);
+
+      // Sync users
+      await this.syncUser(issue.fields.assignee);
+      await this.syncUser(issue.fields.reporter);
+
+      const ticketData = {
+        key: issue.key,
+        summary: issue.fields.summary,
+        description: issue.fields.description,
+        issueType: issue.fields.issuetype.name,
+        status: issue.fields.status.name,
+        priority: issue.fields.priority?.name,
+        resolution: issue.fields.resolution?.name,
+        boardId: board.id,
+        projectId: board.projectId,
+        mainProjectId: mainProjectId || board.account?.projectId || board.mainProjectId,
+        assigneeId: issue.fields.assignee?.accountId
+          ? (await this.userRepository.findOne({
+              where: { accountId: issue.fields.assignee.accountId },
+            }))?.id
+          : null,
+        reporterId: issue.fields.reporter?.accountId
+          ? (await this.userRepository.findOne({
+              where: { accountId: issue.fields.reporter.accountId },
+            }))?.id
+          : null,
+        labels: issue.fields.labels,
+        components: issue.fields.components?.map((c: any) => c.name),
+        storyPoints: issue.fields.customfield_10016,
+        originalEstimate: issue.fields.timeoriginalestimate,
+        remainingEstimate: issue.fields.timeestimate,
+        timeSpent: issue.fields.timespent,
+        epicKey: issue.fields.parent?.key,
+        sprintId: issue.fields.sprint?.id,
+        sprintName: issue.fields.sprint?.name,
+        dueDate: issue.fields.duedate ? new Date(issue.fields.duedate) : null,
+        jiraCreatedAt: new Date(issue.fields.created),
+        jiraUpdatedAt: new Date(issue.fields.updated),
+        lastSyncedAt: new Date(),
+        customFields: this.extractCustomFields(issue.fields),
+      };
+
+      const ticket = await this.ticketService.upsertByKey(issue.key, ticketData);
+      this.logger.log(`Synced ticket ${key}`);
+
+      return ticket;
+    } catch (error) {
+      this.logger.error(`Failed to sync ticket ${key}:`, error);
+      throw error;
+    }
+  }
+
+  async syncBoardTickets(
+    boardId: string,
+    assigneeAccountId?: string,
+    syncMode: 'assigned' | 'all' | 'custom' = 'assigned',
+    customJql?: string
+  ): Promise<void> {
     const board = await this.boardRepository.findOne({
       where: { id: boardId },
       relations: ['account'],
@@ -129,16 +232,25 @@ export class JiraSyncService {
     const account = await this.accountService.getDecryptedAccount(board.account.id);
     const client = this.getJiraClient(account);
 
-    this.logger.log(`Syncing tickets for board ${board.name}`);
+    this.logger.log(`Syncing tickets for board ${board.name} (mode: ${syncMode})`);
 
     try {
-      const currentUser = await client.getCurrentUser();
-      this.logger.log(`Syncing tickets assigned to: ${currentUser.displayName} (${currentUser.accountId})`);
+      let jql: string;
 
-      await this.ticketService.deleteByBoard(board.id);
-      this.logger.log(`Cleared existing tickets for board ${board.name}`);
+      if (syncMode === 'custom' && customJql) {
+        jql = customJql;
+        this.logger.log(`Using custom JQL: ${jql}`);
+      } else if (syncMode === 'all') {
+        jql = `project = "${board.projectKey}"`;
+        this.logger.log(`Syncing all tickets in project ${board.projectKey}`);
+      } else {
+        // Default to 'assigned' mode
+        const currentUser = await client.getCurrentUser();
+        const targetAssignee = assigneeAccountId || currentUser.accountId;
+        jql = `assignee = "${targetAssignee}" AND project = "${board.projectKey}"`;
+        this.logger.log(`Syncing tickets assigned to: ${assigneeAccountId ? assigneeAccountId : `${currentUser.displayName} (${currentUser.accountId})`}`);
+      }
 
-      const jql = `assignee = "${currentUser.accountId}" AND project = "${board.projectKey}"`;
       this.logger.log(`JQL Query: ${jql}`);
 
       // Use the new /search/jql endpoint directly
@@ -208,7 +320,14 @@ export class JiraSyncService {
       }
 
       await this.boardRepository.update(board.id, { lastSyncedAt: new Date() });
-      this.logger.log(`Synced ${issues.issues.length} tickets assigned to ${currentUser.displayName} for board ${board.name}`);
+
+      const syncDescription = syncMode === 'all'
+        ? `all ${issues.issues.length} tickets`
+        : syncMode === 'custom'
+          ? `${issues.issues.length} tickets from custom query`
+          : `${issues.issues.length} tickets assigned to user`;
+
+      this.logger.log(`Synced ${syncDescription} for board ${board.name}`);
     } catch (error) {
       this.logger.error(`Failed to sync tickets for board ${board.name}:`, error);
       throw error;
@@ -230,6 +349,32 @@ export class JiraSyncService {
       },
       ['accountId'],
     );
+  }
+
+  async syncAllUsers(jiraAccountId: string): Promise<JiraUser[]> {
+    const account = await this.accountService.getDecryptedAccount(jiraAccountId);
+    const client = this.getJiraClient(account);
+
+    this.logger.log(`Syncing all users for account ${account.accountName}`);
+
+    try {
+      // Get all users (this might need pagination for large instances)
+      const users = await client.searchUsers({ maxResults: 1000 });
+
+      for (const userData of users) {
+        await this.syncUser(userData);
+      }
+
+      this.logger.log(`Synced ${users.length} users for account ${account.accountName}`);
+
+      // Return all users from the database
+      return this.userRepository.find({
+        order: { displayName: 'ASC' },
+      });
+    } catch (error) {
+      this.logger.error(`Failed to sync users for account ${account.accountName}:`, error);
+      throw error;
+    }
   }
 
   private extractCustomFields(fields: any): any {

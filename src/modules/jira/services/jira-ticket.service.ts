@@ -171,6 +171,10 @@ export class JiraTicketService {
     await this.jiraTicketRepository.delete({ boardId });
   }
 
+  async deleteByProject(projectId: string): Promise<void> {
+    await this.jiraTicketRepository.delete({ projectId });
+  }
+
   async getTicketsByBoard(boardId: string): Promise<JiraTicket[]> {
     return await this.jiraTicketRepository.find({
       where: { boardId },

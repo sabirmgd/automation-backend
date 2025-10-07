@@ -15,6 +15,8 @@ import { CommandModule } from './clients/command/command.module';
 import { CredentialsModule } from './credentials/credentials.module';
 import { PromptsModule } from './prompts/prompts.module';
 import { CodeModule } from './code/code.module';
+import { HappySessionModule } from './happy/happy-session.module';
+import { TicketWorkflowModule } from './workflows/ticket-workflow.module';
 import configuration from './config';
 import { validationSchema } from './config/validation.schema';
 
@@ -56,6 +58,8 @@ import { validationSchema } from './config/validation.schema';
     TasksModule,
     CronsModule,
     CodeModule,
+    HappySessionModule,
+    TicketWorkflowModule,
   ],
   controllers: [AppController],
   providers: [AppService],

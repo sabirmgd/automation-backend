@@ -1,0 +1,37 @@
+#!/usr/bin/expect -f
+
+# Get arguments from the command line.
+set initial_message [lindex $argv 0]
+set target_directory [lindex $argv 1]
+
+# Check if both arguments were provided.
+if {[llength $argv] != 2} {
+    puts "Usage: ./start-happy-with-context.exp \"Your first message\" \"/path/to/your/folder\""
+    exit 1
+}
+
+# Change to the target directory.
+if {[catch {cd $target_directory} errmsg]} {
+    puts "Error: Could not change to directory '$target_directory'."
+    puts "System error: $errmsg"
+    exit 1
+}
+
+# Start the 'happy' process with --yolo flag to bypass permissions
+spawn happy --yolo
+
+# Wait for the happy UI to be ready
+expect "> "
+
+# Send the initial message
+send -- "$initial_message"
+
+# Pause for a fraction of a second
+sleep 0.1
+
+# Send the Enter keypress
+send -- "\r"
+
+# Hand over control to the background
+# The process will continue running
+interact

@@ -26,6 +26,7 @@ export class HiddenCommentResponseDto {
   content: string;
   authorType: AuthorType;
   authorName: string;
+  sessionId?: string;
   createdAt: Date;
   updatedAt: Date;
 }

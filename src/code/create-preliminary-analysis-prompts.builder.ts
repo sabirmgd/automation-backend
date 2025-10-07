@@ -288,4 +288,25 @@ Your analysis should be so complete that implementation becomes mechanical.`;
   getPrompt(): string {
     return this.buildPrompt();
   }
+
+  /**
+   * Build a simple prompt for resuming a conversation with just a user note
+   */
+  buildUserNotePrompt(userNote: string): string {
+    if (!this.ticket) {
+      throw new Error('Ticket is required to build user note prompt');
+    }
+
+    const sections: string[] = [];
+
+    sections.push('=== CONTINUATION REQUEST ===');
+    sections.push(`Continuing analysis for ticket ${this.ticket.key}: ${this.ticket.summary}`);
+    sections.push('');
+    sections.push('User Note:');
+    sections.push(userNote);
+    sections.push('');
+    sections.push('Please address the user\'s note above, considering the previous context of our conversation.');
+
+    return sections.join('\n');
+  }
 }

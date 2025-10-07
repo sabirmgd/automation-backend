@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, Not, IsNull, MoreThan } from 'typeorm';
 import { CommandClient } from '../clients/command/command.client';
 import { JiraTicketService } from '../modules/jira/services/jira-ticket.service';
 import { ProjectsService } from '../projects/projects.service';
@@ -54,8 +54,35 @@ export class CodeService {
     console.log('Project Name:', project.name);
     console.log('Ticket Key:', ticket.key);
 
+    // Check for existing session
+    const existingSession = await this.getExistingSession(ticket.id);
+
+    if (existingSession && !existingSession.hasNewUserComments) {
+      console.log('Session exists with no new user comments - skipping analysis');
+      return {
+        projectId: project.id,
+        projectName: project.name,
+        ticketId: ticket.id,
+        ticketKey: ticket.key,
+        status: 'up-to-date',
+        message: 'Analysis is already up to date. Add a comment to continue the conversation.',
+      };
+    }
+
+    const analysisType = existingSession?.hasNewUserComments ? 'resume' : 'new';
+    console.log(`Analysis type: ${analysisType}`);
+    if (existingSession) {
+      console.log(`Resuming session: ${existingSession.sessionId}`);
+    }
+
     // Start the analysis in the background
-    this.runAnalysisInBackground(project, ticket, projectId).catch((error) => {
+    this.runAnalysisInBackground(
+      project,
+      ticket,
+      projectId,
+      existingSession?.sessionId || null,
+      analysisType === 'resume',
+    ).catch((error) => {
       console.error('Background analysis failed:', error);
     });
 
@@ -66,7 +93,9 @@ export class CodeService {
       ticketId: ticket.id,
       ticketKey: ticket.key,
       status: 'processing',
-      message: 'Analysis started in background. It may take up to 10 minutes.',
+      message: analysisType === 'resume'
+        ? 'Continuing conversation in background...'
+        : 'Analysis started in background. It may take up to 10 minutes.',
     };
   }
 
@@ -74,64 +103,96 @@ export class CodeService {
     project: any,
     ticket: any,
     projectId: string,
+    existingSessionId: string | null,
+    isResume: boolean,
   ): Promise<void> {
     console.log(`\n=== Running analysis for ${ticket.key} in background ===`);
     console.log('Starting at:', new Date().toISOString());
+    console.log('Mode:', isResume ? 'RESUME' : 'NEW SESSION');
 
     const cwd = project.localPath || process.cwd();
 
-    // Get INSPECT_JIRA prompt
-    let inspectJiraPromptContent = null;
-    try {
-      const prompt = await this.promptsService.getPromptByName(
-        mustPrompts.INSPECT_JIRA,
-        projectId,
-      );
-      inspectJiraPromptContent = prompt.content;
-      console.log('INSPECT_JIRA Prompt Found');
-    } catch (error) {
-      console.log('INSPECT_JIRA Prompt Not Found');
+    let analysisPrompt: string;
+    let sessionId: string | null = existingSessionId;
+
+    if (isResume) {
+      // For resume, just get the latest user note
+      const userNote = await this.getLatestUserNote(ticket.id);
+      if (!userNote) {
+        console.error('No user note found for resume');
+        return;
+      }
+
+      const promptBuilder = new CreatePreliminaryAnalysisPromptsBuilder()
+        .setTicket(ticket);
+
+      analysisPrompt = promptBuilder.buildUserNotePrompt(userNote);
+      console.log('Resume prompt (user note only):', analysisPrompt.substring(0, 200));
+    } else {
+      // For new session, build full context
+      // Get INSPECT_JIRA prompt
+      let inspectJiraPromptContent = null;
+      try {
+        const prompt = await this.promptsService.getPromptByName(
+          mustPrompts.INSPECT_JIRA,
+          projectId,
+        );
+        inspectJiraPromptContent = prompt.content;
+        console.log('INSPECT_JIRA Prompt Found');
+      } catch (error) {
+        console.log('INSPECT_JIRA Prompt Not Found');
+      }
+
+      // Get previous hidden comments for this ticket
+      const hiddenComments = await this.hiddenCommentRepository.find({
+        where: { ticketId: ticket.id },
+        order: { createdAt: 'ASC' },
+      });
+
+      console.log(`Found ${hiddenComments.length} previous comments`);
+
+      // Build the prompt using the builder
+      const promptBuilder = new CreatePreliminaryAnalysisPromptsBuilder()
+        .setProject(project)
+        .setTicket(ticket)
+        .setInspectJiraPrompt(inspectJiraPromptContent)
+        .setHiddenComments(hiddenComments);
+
+      analysisPrompt = promptBuilder.buildPrompt();
+      console.log('Full prompt length:', analysisPrompt.length, 'characters');
     }
-
-    // Get previous hidden comments for this ticket
-    const hiddenComments = await this.hiddenCommentRepository.find({
-      where: { ticketId: ticket.id },
-      order: { createdAt: 'ASC' },
-    });
-
-    console.log(`Found ${hiddenComments.length} previous comments`);
-
-    // Build the prompt using the builder
-    const promptBuilder = new CreatePreliminaryAnalysisPromptsBuilder()
-      .setProject(project)
-      .setTicket(ticket)
-      .setInspectJiraPrompt(inspectJiraPromptContent)
-      .setHiddenComments(hiddenComments);
-
-    const analysisPrompt = promptBuilder.buildPrompt();
-    const command = promptBuilder.buildCommand(analysisPrompt);
 
     console.log('Executing Claude Analysis...');
     console.log('Working Directory:', cwd);
-    console.log('Prompt length:', analysisPrompt.length, 'characters');
-    console.log('First 100 chars of prompt:', analysisPrompt.substring(0, 100));
-    console.log('Last 100 chars of prompt:', analysisPrompt.substring(analysisPrompt.length - 100));
 
     try {
       console.log('Calling executeClaudeWithFile at:', new Date().toISOString());
 
-      // Execute Claude CLI with the actual analysis prompt
-      const analysisResult = await this.executeClaudeWithFile(command, analysisPrompt, cwd);
+      // Execute Claude with resume option if applicable
+      const result = await this.executeClaudeWithFile(
+        analysisPrompt,
+        cwd,
+        sessionId,
+      );
 
       console.log('Got result from executeClaudeWithFile at:', new Date().toISOString());
-      console.log('Result length:', analysisResult.length, 'characters');
+      console.log('Result length:', result.analysisText.length, 'characters');
 
-      // Store the analysis as a hidden comment
+      // Extract session ID if it's a new session
+      if (!isResume && result.sessionId) {
+        sessionId = result.sessionId;
+        console.log('New session ID:', sessionId);
+      }
+
+      // Store the analysis as a hidden comment with session ID
       const hiddenComment = this.hiddenCommentRepository.create({
         ticketId: ticket.id,
-        content: analysisResult,
+        content: result.analysisText,
         authorType: AuthorType.AI,
-        authorName: 'Claude Opus 4.1 - Preliminary Analysis',
+        authorName: isResume
+          ? 'Claude Opus 4.1 - Continued Analysis'
+          : 'Claude Opus 4.1 - Preliminary Analysis',
+        sessionId: sessionId,
       });
 
       await this.hiddenCommentRepository.save(hiddenComment);
@@ -145,16 +206,59 @@ export class CodeService {
       console.error('Error:', error.message);
       console.error('Error stack:', error.stack);
 
-      // Store error as hidden comment
+      // Store error as hidden comment (preserve session ID if resuming)
       const errorComment = this.hiddenCommentRepository.create({
         ticketId: ticket.id,
         content: `Analysis failed: ${error.message}`,
         authorType: AuthorType.AI,
         authorName: 'Claude Opus 4.1 - Error',
+        sessionId: existingSessionId, // Preserve session ID for continuity
       });
 
       await this.hiddenCommentRepository.save(errorComment);
     }
+  }
+
+  private async getExistingSession(ticketId: string): Promise<{ sessionId: string; hasNewUserComments: boolean } | null> {
+    // Get the latest AI comment with a session ID
+    const latestAIComment = await this.hiddenCommentRepository.findOne({
+      where: {
+        ticketId,
+        authorType: AuthorType.AI,
+        sessionId: Not(IsNull()),
+      },
+      order: { createdAt: 'DESC' },
+    });
+
+    if (!latestAIComment) {
+      return null;
+    }
+
+    // Check if there are user comments after this AI comment
+    const newerUserComment = await this.hiddenCommentRepository.findOne({
+      where: {
+        ticketId,
+        authorType: AuthorType.USER,
+        createdAt: MoreThan(latestAIComment.createdAt),
+      },
+    });
+
+    return {
+      sessionId: latestAIComment.sessionId,
+      hasNewUserComments: !!newerUserComment,
+    };
+  }
+
+  private async getLatestUserNote(ticketId: string): Promise<string | null> {
+    const latestUserComment = await this.hiddenCommentRepository.findOne({
+      where: {
+        ticketId,
+        authorType: AuthorType.USER,
+      },
+      order: { createdAt: 'DESC' },
+    });
+
+    return latestUserComment?.content || null;
   }
 
   async checkForNewAIComments(ticketIds: string[]): Promise<Record<string, boolean>> {
@@ -219,7 +323,11 @@ export class CodeService {
     }
   }
 
-  private async executeClaudeWithFile(_command: string[], fullPrompt: string, cwd: string): Promise<string> {
+  private async executeClaudeWithFile(
+    fullPrompt: string,
+    cwd: string,
+    resumeSessionId: string | null = null,
+  ): Promise<{ analysisText: string; sessionId: string | null }> {
     try {
       console.log('Using Claude SDK for analysis...');
       console.log('Working directory:', cwd);
@@ -227,14 +335,27 @@ export class CodeService {
 
       // Split the prompt to extract system context
       const promptLines = fullPrompt.split('\n');
-      const requestMarker = 'MISSION: Perform a preliminary analysis';
-      const requestIndex = promptLines.findIndex(line => line.includes(requestMarker));
+
+      // Check for different markers based on whether we're resuming
+      const requestMarkers = [
+        'MISSION: Perform a preliminary analysis',
+        '=== CONTINUATION REQUEST ==='
+      ];
+
+      let requestIndex = -1;
+      for (const marker of requestMarkers) {
+        const index = promptLines.findIndex(line => line.includes(marker));
+        if (index >= 0) {
+          requestIndex = index;
+          break;
+        }
+      }
 
       let systemAppend: string;
       let mainPrompt: string;
 
       if (requestIndex > 0) {
-        // Everything before the mission is additional system context
+        // Everything before the marker is additional system context
         systemAppend = promptLines.slice(0, requestIndex).join('\n');
         mainPrompt = promptLines.slice(requestIndex).join('\n');
       } else {
@@ -245,29 +366,40 @@ export class CodeService {
       console.log('System append length:', systemAppend.length);
       console.log('Main prompt length:', mainPrompt.length);
 
+      if (resumeSessionId) {
+        console.log('Resuming session:', resumeSessionId);
+      }
+
       // Use the Claude SDK with planning mode and restricted tools
       // This simulates running Claude Code with project configuration
+      const queryOptions: any = {
+        // Allow only read and search tools (no modifications)
+        allowedTools: ['Read', 'Grep', 'Glob', 'WebSearch'],
+
+        // Set the working directory for the agent
+        cwd: cwd,
+
+        // Use Claude Opus 4.1 model
+        model: 'claude-opus-4-1-20250805',
+
+        maxTurns: 1000,
+        // Use Claude Code preset with additional context
+        systemPrompt: {
+          type: 'preset' as const,
+          preset: 'claude_code' as const,
+          append: systemAppend || undefined
+        },
+        permissionMode : 'bypassPermissions' as const
+      };
+
+      // Add resume option if session ID provided
+      if (resumeSessionId) {
+        queryOptions.resume = resumeSessionId;
+      }
+
       const queryGenerator = query({
         prompt: mainPrompt,
-        options: {
-          // Allow only read and search tools (no modifications)
-          allowedTools: ['Read', 'Grep', 'Glob', 'WebSearch'],
-
-          // Set the working directory for the agent
-          cwd: cwd,
-
-          // Use Claude Opus 4.1 model
-          model: 'claude-opus-4-1-20250805',
-
-          maxTurns: 1000,
-          // Use Claude Code preset with additional context
-          systemPrompt: {
-            type: 'preset' as const,
-            preset: 'claude_code' as const,
-            append: systemAppend || undefined
-          },
-          permissionMode : 'bypassPermissions' as const
-        }
+        options: queryOptions
       });
 
       console.log('Processing Claude SDK messages...');
@@ -275,6 +407,7 @@ export class CodeService {
       // Collect all messages from the generator
       let analysisText = '';
       let messageCount = 0;
+      let capturedSessionId: string | null = null;
 
       for await (const message of queryGenerator) {
         messageCount++;
@@ -302,11 +435,17 @@ export class CodeService {
           }
         }
 
-        // Check for system messages (initialization)
+        // Check for system messages (initialization) and capture session ID
         if (message.type === 'system') {
           console.log('System message subtype:', (message as any).subtype);
           if ((message as any).subtype === 'init') {
+            // Capture session ID from init message
+            if ((message as any).session_id) {
+              capturedSessionId = (message as any).session_id;
+              console.log('✅ Captured session ID:', capturedSessionId);
+            }
             console.log('Init details:', {
+              session_id: (message as any).session_id,
               tools: (message as any).tools,
               model: (message as any).model,
               permissionMode: (message as any).permissionMode,
@@ -342,12 +481,16 @@ export class CodeService {
       console.log('✅ Claude SDK analysis completed');
       console.log(`Total messages processed: ${messageCount}`);
       console.log('Analysis length:', analysisText.length, 'characters');
+      console.log('Session ID:', capturedSessionId || resumeSessionId);
 
       if (analysisText.length < 500) {
         console.warn('⚠️ Output seems short, first 200 chars:', analysisText.substring(0, 200));
       }
 
-      return analysisText.trim();
+      return {
+        analysisText: analysisText.trim(),
+        sessionId: capturedSessionId || resumeSessionId
+      };
     } catch (error: any) {
       console.error('❌ Claude SDK analysis failed:', error);
       throw new Error(`Claude analysis failed: ${error.message}`);

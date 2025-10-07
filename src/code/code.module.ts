@@ -1,11 +1,13 @@
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { CodeService } from './code.service';
+import { BranchNameService } from './branch-name.service';
 import { CodeController } from './code.controller';
 import { CommandModule } from '../clients/command/command.module';
 import { JiraModule } from '../modules/jira/jira.module';
 import { ProjectsModule } from '../projects/projects.module';
 import { PromptsModule } from '../prompts/prompts.module';
+import { GitAgentsModule } from '../agents/git-agents/git-agents.module';
 import { HiddenComment } from '../modules/jira/entities/hidden-comment.entity';
 
 @Module({
@@ -15,9 +17,10 @@ import { HiddenComment } from '../modules/jira/entities/hidden-comment.entity';
     JiraModule,
     ProjectsModule,
     PromptsModule,
+    GitAgentsModule,
   ],
   controllers: [CodeController],
-  providers: [CodeService],
-  exports: [CodeService],
+  providers: [CodeService, BranchNameService],
+  exports: [CodeService, BranchNameService],
 })
 export class CodeModule {}

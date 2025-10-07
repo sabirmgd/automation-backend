@@ -39,6 +39,9 @@ export class HiddenComment {
   @Column({ nullable: true })
   authorName: string;
 
+  @Column({ nullable: true })
+  sessionId: string;
+
   @CreateDateColumn()
   createdAt: Date;
 

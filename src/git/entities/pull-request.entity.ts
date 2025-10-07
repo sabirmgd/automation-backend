@@ -15,6 +15,7 @@ import { GitRepository } from './git-repository.entity';
 import { JiraTicket } from '../../modules/jira/entities/jira-ticket.entity';
 import { ReviewComment } from './review-comment.entity';
 import { Pipeline } from './pipeline.entity';
+import { Worktree } from './worktree.entity';
 
 export enum PullRequestStatus {
   OPEN = 'open',
@@ -141,6 +142,13 @@ export class PullRequest {
 
   @Column({ type: 'uuid' })
   repositoryId: string;
+
+  @Column({ type: 'uuid', nullable: true })
+  worktreeId: string;
+
+  @ManyToOne(() => Worktree, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'worktreeId' })
+  worktree: Worktree;
 
   @ManyToMany(() => JiraTicket, { cascade: false })
   @JoinTable({

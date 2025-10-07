@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import { HiddenComment } from '../modules/jira/entities/hidden-comment.entity';
+import { HiddenComment, AuthorType } from '../modules/jira/entities/hidden-comment.entity';
 import { JiraTicket } from '../modules/jira/entities/jira-ticket.entity';
 
 export interface HappyContextOptions {
@@ -41,7 +41,7 @@ export class HappyContextBuilder {
     const latestAIComment = await this.hiddenCommentRepository.findOne({
       where: {
         ticketId,
-        authorType: 'ai',
+        authorType: AuthorType.AI,
       },
       order: { createdAt: 'DESC' },
     });

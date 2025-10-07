@@ -96,8 +96,9 @@ export class TicketWorkflow {
     mode?: 'implementation' | 'context';
     startedAt?: Date;
     stoppedAt?: Date;
-    status?: 'running' | 'stopped' | 'crashed';
+    status?: 'running' | 'stopped' | 'crashed' | 'context_sent';
     additionalInstructions?: string;
+    initialResponse?: string;
   };
 
   // PR phase

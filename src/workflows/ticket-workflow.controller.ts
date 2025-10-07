@@ -14,6 +14,7 @@ import { TicketWorkflowService } from './ticket-workflow.service';
 import { GenerateWorkflowBranchNameDto } from './dto/generate-branch-name.dto';
 import { UpdateWorkflowDto } from './dto/update-workflow.dto';
 import { CreateWorktreeFromWorkflowDto } from './dto/create-worktree-from-workflow.dto';
+import { DeleteWorktreeDto } from './dto/delete-worktree.dto';
 import { WorkflowStatus } from './entities/ticket-workflow.entity';
 
 @Controller('workflows')
@@ -54,6 +55,18 @@ export class TicketWorkflowController {
   @Post('worktree')
   async createWorktree(@Body() dto: CreateWorktreeFromWorkflowDto) {
     return this.workflowService.createWorktreeFromBranchName(dto);
+  }
+
+  /**
+   * Delete worktree for a ticket
+   */
+  @Delete('ticket/:ticketId/worktree')
+  @HttpCode(HttpStatus.OK)
+  async deleteWorktree(
+    @Param('ticketId') ticketId: string,
+    @Body() dto: DeleteWorktreeDto,
+  ) {
+    return this.workflowService.deleteWorktree(ticketId, dto);
   }
 
   /**
@@ -106,5 +119,39 @@ export class TicketWorkflowController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async deleteWorkflow(@Param('ticketId') ticketId: string) {
     await this.workflowService.deleteWorkflow(ticketId);
+  }
+
+  /**
+   * Start Happy session for a ticket
+   */
+  @Post('ticket/:ticketId/happy/start')
+  async startHappySession(
+    @Param('ticketId') ticketId: string,
+    @Body() dto: {
+      mode: 'implementation' | 'context';
+      additionalInstructions?: string;
+    },
+  ) {
+    return this.workflowService.startHappySession(
+      ticketId,
+      dto.mode,
+      dto.additionalInstructions,
+    );
+  }
+
+  /**
+   * Stop Happy session for a ticket
+   */
+  @Post('ticket/:ticketId/happy/stop')
+  async stopHappySession(@Param('ticketId') ticketId: string) {
+    return this.workflowService.stopHappySession(ticketId);
+  }
+
+  /**
+   * Get Happy session status for a ticket
+   */
+  @Get('ticket/:ticketId/happy/status')
+  async getHappySessionStatus(@Param('ticketId') ticketId: string) {
+    return this.workflowService.getHappySessionStatus(ticketId);
   }
 }

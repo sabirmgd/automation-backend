@@ -369,10 +369,15 @@ export class WorktreeService {
       throw new NotFoundException(`Worktree with ID ${id} not found`);
     }
 
-    const repository = worktree.repository;
+    // Get the git repo path - either from repository or metadata
+    let gitRepoPath: string;
 
-    if (!repository.localPath) {
-      throw new BadRequestException('Repository has no local path configured');
+    if (worktree.repository?.localPath) {
+      gitRepoPath = worktree.repository.localPath;
+    } else if (worktree.metadata?.gitRepoPath) {
+      gitRepoPath = worktree.metadata.gitRepoPath;
+    } else {
+      throw new BadRequestException('No git repository path found for worktree');
     }
 
     // Build command arguments
@@ -386,7 +391,7 @@ export class WorktreeService {
     try {
       const result = await this.commandClient
         .command(`${this.worktreeManagerScript} ${args.join(' ')}`)
-        .inDirectory(repository.localPath)
+        .inDirectory(gitRepoPath)
         .withTimeout(30000)
         .run();
 
@@ -415,7 +420,7 @@ export class WorktreeService {
       try {
         await this.commandClient
           .command(`git branch -D ${worktree.branchName}`)
-          .inDirectory(repository.localPath)
+          .inDirectory(gitRepoPath)
           .run();
 
         this.logger.log(`Deleted branch: ${worktree.branchName}`);

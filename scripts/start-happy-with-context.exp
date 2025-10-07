@@ -3,10 +3,30 @@
 # Get arguments from the command line.
 set initial_message [lindex $argv 0]
 set target_directory [lindex $argv 1]
+set provided_session_id [lindex $argv 2]
 
-# Check if both arguments were provided.
-if {[llength $argv] != 2} {
-    puts "Usage: ./start-happy-with-context.exp \"Your first message\" \"/path/to/your/folder\""
+# Helper to generate a UUID when none is provided
+proc generate_uuid {} {
+    if {![catch {string trim [exec uuidgen]} uuid]} {
+        return [string tolower $uuid]
+    }
+
+    # Fallback implementation using random bits
+    set rand_bytes ""
+    for {set i 0} {$i < 16} {incr i} {
+        append rand_bytes [format %02x [expr {int(rand()*256)}]]
+    }
+    return [format "%s-%s-%s-%s-%s" \
+        [string range $rand_bytes 0 7] \
+        [string range $rand_bytes 8 11] \
+        [string range $rand_bytes 12 15] \
+        [string range $rand_bytes 16 19] \
+        [string range $rand_bytes 20 31]]
+}
+
+# Check arguments
+if {[llength $argv] < 2} {
+    puts "Usage: ./start-happy-with-context.exp \"Your first message\" \"/path/to/your/folder\" ?session-id?"
     exit 1
 }
 
@@ -17,21 +37,55 @@ if {[catch {cd $target_directory} errmsg]} {
     exit 1
 }
 
+# Using a fixed startup delay for deterministic behavior; skipping prompt detection
+
 # Start the 'happy' process with --yolo flag to bypass permissions
-spawn happy --yolo
+if {$provided_session_id eq ""} {
+    set provided_session_id [generate_uuid]
+    puts "DEBUG: Generated session id $provided_session_id"
+}
 
-# Wait for the happy UI to be ready
-expect "> "
+puts "DEBUG: Starting happy --yolo --session-id $provided_session_id"
+spawn happy --yolo --session-id $provided_session_id
+if {$spawn_id < 0} {
+    puts "Error: Failed to spawn happy process"
+    exit 1
+}
 
-# Send the initial message
-send -- "$initial_message"
+# Set much longer timeout for Happy to fully start
+set timeout 60
 
-# Pause for a fraction of a second
+set startup_wait_seconds 12
+puts "DEBUG: Sleeping $startup_wait_seconds seconds for Happy to initialize..."
+sleep $startup_wait_seconds
+
+puts "DEBUG: Sending context message (length: [string length $initial_message] chars)..."
+
+# Ensure prompt is active
+send -- "\r"
 sleep 0.1
 
-# Send the Enter keypress
+## Deterministic send without bracketed paste
+
+# Chunked send to avoid overflowing input buffers
+set msg "$initial_message"
+set msg_len [string length $msg]
+set idx 0
+set chunk 512
+while {$idx < $msg_len} {
+    set end [expr {$idx + $chunk - 1}]
+    if {$end >= $msg_len} { set end [expr {$msg_len - 1}] }
+    set part [string range $msg $idx $end]
+    send -- $part
+    set idx [expr {$end + 1}]
+    if {$idx < $msg_len} { sleep 0.02 }
+}
+
+# Submit
+sleep 0.1
 send -- "\r"
 
-# Hand over control to the background
-# The process will continue running
+puts "DEBUG: Context sent, starting interactive mode..."
+
+# Keep the process running interactively
 interact

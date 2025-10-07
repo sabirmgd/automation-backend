@@ -12,15 +12,14 @@ import { EnvHandling } from '../git/entities/worktree.entity';
 import { WorktreeResponseDto } from '../git/dto/worktree.dto';
 import { GitRepository, GitProvider } from '../git/entities/git-repository.entity';
 import { HappyContextBuilder } from '../code/happy-context.builder';
-import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import { randomUUID } from 'crypto';
+import { query } from '@anthropic-ai/claude-agent-sdk';
 
 @Injectable()
 export class TicketWorkflowService {
   private readonly logger = new Logger(TicketWorkflowService.name);
-
-  private runningHappyProcesses: Map<string, ChildProcess> = new Map();
 
   constructor(
     @InjectRepository(TicketWorkflow)
@@ -355,14 +354,99 @@ export class TicketWorkflowService {
   }
 
   /**
-   * Start Happy session with context
+   * Delete worktree for a ticket
+   */
+  async deleteWorktree(
+    ticketId: string,
+    options: { deleteBranch?: boolean; force?: boolean } = {},
+  ): Promise<TicketWorkflow> {
+    this.logger.log(`Deleting worktree for ticket ${ticketId}`);
+
+    // Get workflow
+    const workflow = await this.getByTicketId(ticketId);
+    if (!workflow) {
+      throw new NotFoundException(`Workflow for ticket ${ticketId} not found`);
+    }
+
+    if (!workflow.worktreeId) {
+      throw new BadRequestException('No worktree exists for this ticket');
+    }
+
+    // Check if Happy session exists
+    if (workflow.happySessionId && workflow.happySessionMetadata?.status !== 'stopped') {
+      throw new BadRequestException(
+        'Cannot delete worktree while Happy session exists. Please stop the session first.',
+      );
+    }
+
+    // Get worktree details
+    const worktree = await this.worktreeService.findOne(workflow.worktreeId);
+    if (!worktree) {
+      // Worktree record doesn't exist, just clean up workflow
+      workflow.worktreeId = null;
+      workflow.status = WorkflowStatus.BRANCH_GENERATED;
+      await this.workflowRepository.save(workflow);
+      return workflow;
+    }
+
+    // Remove worktree using service
+    await this.worktreeService.removeWorktree(workflow.worktreeId, {
+      force: options.force ?? true,
+    });
+
+    // Delete branch if requested
+    if (options.deleteBranch && workflow.generatedBranchName) {
+      this.logger.log(`Deleting branch: ${workflow.generatedBranchName}`);
+
+      // Get project to find git repo path
+      const project = await this.projectsService.findOne(workflow.projectId);
+      if (project && project.localPath) {
+        const subfolder = worktree.metadata?.subfolder || 'backend';
+        const gitRepoPath = `${project.localPath}/${subfolder}`;
+
+        try {
+          // Delete the branch
+          const { exec } = require('child_process');
+          const util = require('util');
+          const execPromise = util.promisify(exec);
+
+          await execPromise(`git branch -D ${workflow.generatedBranchName}`, {
+            cwd: gitRepoPath,
+          });
+
+          this.logger.log(`Branch ${workflow.generatedBranchName} deleted`);
+        } catch (error: any) {
+          this.logger.warn(`Failed to delete branch: ${error.message}`);
+          // Don't fail the whole operation if branch deletion fails
+        }
+      }
+    }
+
+    // Update workflow
+    workflow.worktreeId = null;
+    workflow.status = WorkflowStatus.BRANCH_GENERATED;
+    workflow.metadata = {
+      ...workflow.metadata,
+      deletedWorktreeAt: new Date(),
+      deletedWorktreePath: worktree.worktreePath,
+    };
+
+    await this.workflowRepository.save(workflow);
+
+    this.logger.log(`Worktree deleted successfully for ticket ${ticketId}`);
+    return this.getByTicketId(ticketId);
+  }
+
+  /**
+   * Start Happy session with context - Simplified version
+   * Sends initial context via Claude SDK and returns resume command
    */
   async startHappySession(
     ticketId: string,
     mode: 'implementation' | 'context',
     additionalInstructions?: string,
-  ): Promise<TicketWorkflow> {
-    this.logger.log(`Starting Happy session for ticket ${ticketId} in ${mode} mode`);
+  ): Promise<TicketWorkflow & { resumeCommands: { cd: string; happy: string } }> {
+    this.logger.log(`Initializing Happy session for ticket ${ticketId} in ${mode} mode`);
 
     // Get workflow with worktree
     const workflow = await this.workflowRepository.findOne({
@@ -380,13 +464,6 @@ export class TicketWorkflowService {
       );
     }
 
-    // Check if Happy session already running
-    if (workflow.happyProcessId && this.runningHappyProcesses.has(ticketId)) {
-      throw new BadRequestException(
-        `Happy session already running for ticket ${ticketId}`,
-      );
-    }
-
     // Build context message
     const contextMessage = await this.happyContextBuilder.buildContext(ticketId, {
       mode,
@@ -395,84 +472,103 @@ export class TicketWorkflowService {
       branchName: workflow.generatedBranchName,
     });
 
-    // Start Happy using expect script
-    const expectScriptPath = path.join(
-      __dirname,
-      '..',
-      '..',
-      'scripts',
-      'start-happy-with-context.exp',
-    );
-
     try {
-      // Spawn expect script with context message and worktree path
-      const happyProcess = spawn('expect', [
-        expectScriptPath,
-        contextMessage,
-        workflow.worktree.worktreePath,
-      ], {
-        detached: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
+      // Generate session ID for this Happy instance
+      const sessionId = randomUUID();
+      this.logger.log(`Generated session ID: ${sessionId}`);
+
+      // Send the context via Claude SDK (similar to preliminary analysis)
+      this.logger.log('Sending initial context via Claude SDK...');
+
+      const queryOptions: any = {
+        // Allow all tools for development work
+        allowedTools: ['Read', 'Write', 'Edit', 'MultiEdit', 'Bash', 'Grep', 'Glob', 'WebSearch', 'WebFetch'],
+
+        // Set the working directory to the worktree
+        cwd: workflow.worktree.worktreePath,
+
+        // Use Claude Opus 4.1 model (same as Happy uses)
+        model: 'claude-opus-4-1-20250805',
+
+        maxTurns: 1, // Just send the context and get acknowledgment
+
+        // Use Claude Code preset
+        systemPrompt: {
+          type: 'preset' as const,
+          preset: 'claude_code' as const,
+        },
+
+        // Skip permissions like --yolo
+        permissionMode: 'bypassPermissions' as const,
+
+        // Force a specific session ID
+        sessionId: sessionId,
+      };
+
+      // Send the context message
+      const queryGenerator = query({
+        prompt: contextMessage,
+        options: queryOptions,
       });
 
-      // Store process reference
-      this.runningHappyProcesses.set(ticketId, happyProcess);
+      // Process the response
+      let responseText = '';
+      for await (const message of queryGenerator) {
+        if (message.type === 'assistant' && 'message' in message) {
+          const content = message.message.content;
+          if (Array.isArray(content)) {
+            for (const item of content) {
+              if (item.type === 'text') {
+                responseText += item.text + '\n';
+              }
+            }
+          }
+        }
+      }
 
-      // Get the latest session ID from Claude files after a delay
-      const sessionId = await this.getLatestClaudeSessionId(
-        workflow.worktree.worktreePath,
-      );
+      this.logger.log('Context sent successfully to Claude');
+      this.logger.log(`Response preview: ${responseText.substring(0, 200)}...`);
 
       // Update workflow with Happy session info
       workflow.happySessionId = sessionId;
-      workflow.happyProcessId = happyProcess.pid;
       workflow.happySessionMetadata = {
         mode,
         startedAt: new Date(),
-        status: 'running',
+        status: 'context_sent',
         additionalInstructions,
+        initialResponse: responseText.substring(0, 500), // Store first 500 chars
       };
       workflow.status = WorkflowStatus.DEVELOPMENT;
 
       await this.workflowRepository.save(workflow);
 
-      // Handle process exit
-      happyProcess.on('exit', async (code, signal) => {
-        this.logger.log(
-          `Happy session for ticket ${ticketId} exited with code ${code}`,
-        );
-        this.runningHappyProcesses.delete(ticketId);
+      // Prepare resume commands
+      const resumeCommands = {
+        cd: `cd ${workflow.worktree.worktreePath}`,
+        happy: `happy --yolo --continue`,
+      };
 
-        // Update workflow status
-        const updatedWorkflow = await this.workflowRepository.findOne({
-          where: { ticketId },
-        });
+      this.logger.log('=== RESUME COMMANDS ===');
+      this.logger.log(`1. ${resumeCommands.cd}`);
+      this.logger.log(`2. ${resumeCommands.happy}`);
+      this.logger.log('=======================');
 
-        if (updatedWorkflow && updatedWorkflow.happySessionMetadata) {
-          updatedWorkflow.happySessionMetadata = {
-            ...updatedWorkflow.happySessionMetadata,
-            stoppedAt: new Date(),
-            status: code === 0 ? 'stopped' : 'crashed',
-          };
-          await this.workflowRepository.save(updatedWorkflow);
-        }
-      });
-
-      this.logger.log(
-        `Happy session started for ticket ${ticketId} with PID ${happyProcess.pid}`,
-      );
-
-      return workflow;
+      // Return workflow with resume commands
+      return {
+        ...workflow,
+        resumeCommands,
+      };
     } catch (error: any) {
-      this.logger.error(`Failed to start Happy session: ${error.message}`);
+      this.logger.error(`Failed to initialize Happy session: ${error.message}`);
       throw new BadRequestException(
-        `Failed to start Happy session: ${error.message}`,
+        `Failed to initialize Happy session: ${error.message}`,
       );
     }
   }
 
   /**
-   * Stop Happy session
+   * Stop Happy session - Simplified version
+   * Just marks the session as stopped in the database
    */
   async stopHappySession(ticketId: string): Promise<TicketWorkflow> {
     const workflow = await this.getByTicketId(ticketId);
@@ -481,28 +577,11 @@ export class TicketWorkflowService {
       throw new NotFoundException(`Workflow for ticket ${ticketId} not found`);
     }
 
-    const process = this.runningHappyProcesses.get(ticketId);
-
-    if (process) {
-      this.logger.log(`Stopping Happy session for ticket ${ticketId}`);
-
-      try {
-        // Try graceful shutdown first
-        process.kill('SIGTERM');
-
-        // Wait a bit for graceful shutdown
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-
-        // Force kill if still running
-        if (this.runningHappyProcesses.has(ticketId)) {
-          process.kill('SIGKILL');
-        }
-
-        this.runningHappyProcesses.delete(ticketId);
-      } catch (error: any) {
-        this.logger.error(`Error killing process: ${error.message}`);
-      }
+    if (!workflow.happySessionId) {
+      throw new BadRequestException(`No Happy session found for ticket ${ticketId}`);
     }
+
+    this.logger.log(`Marking Happy session ${workflow.happySessionId} as stopped for ticket ${ticketId}`);
 
     // Update workflow metadata
     if (workflow.happySessionMetadata) {
@@ -518,12 +597,12 @@ export class TicketWorkflowService {
   }
 
   /**
-   * Get Happy session status
+   * Get Happy session status - Simplified version
    */
   async getHappySessionStatus(ticketId: string): Promise<{
-    status: 'running' | 'stopped' | 'crashed' | 'not_started';
+    status: 'context_sent' | 'stopped' | 'not_started' | 'running' | 'crashed';
     sessionId?: string;
-    processId?: number;
+    resumeCommands?: { cd: string; happy: string };
     metadata?: any;
   }> {
     const workflow = await this.getByTicketId(ticketId);
@@ -536,73 +615,18 @@ export class TicketWorkflowService {
       return { status: 'not_started' };
     }
 
-    // Check if process is actually running
-    const isRunning = this.runningHappyProcesses.has(ticketId);
+    // Build resume commands
+    const resumeCommands = workflow.worktree ? {
+      cd: `cd ${workflow.worktree.worktreePath}`,
+      happy: `happy --yolo --continue`,
+    } : undefined;
 
     return {
-      status: isRunning
-        ? 'running'
-        : workflow.happySessionMetadata?.status || 'stopped',
+      status: workflow.happySessionMetadata?.status || 'context_sent',
       sessionId: workflow.happySessionId,
-      processId: workflow.happyProcessId,
+      resumeCommands,
       metadata: workflow.happySessionMetadata,
     };
   }
 
-  /**
-   * Get the latest Claude session ID from the project's session files
-   */
-  private async getLatestClaudeSessionId(
-    worktreePath: string,
-  ): Promise<string> {
-    // Wait a bit for Happy to create the session file
-    await new Promise((resolve) => setTimeout(resolve, 3000));
-
-    // Get project path for Claude sessions
-    const projectPath = worktreePath.replace(/\//g, '-');
-    const claudeSessionsPath = path.join(
-      process.env.HOME || '~',
-      '.claude',
-      'projects',
-      projectPath,
-    );
-
-    try {
-      // List all .jsonl files in the directory
-      const files = await fs.readdir(claudeSessionsPath);
-      const jsonlFiles = files.filter((f) => f.endsWith('.jsonl'));
-
-      if (jsonlFiles.length === 0) {
-        throw new Error('No Claude session files found');
-      }
-
-      // Get the most recent file
-      const fileStats = await Promise.all(
-        jsonlFiles.map(async (file) => {
-          const filePath = path.join(claudeSessionsPath, file);
-          const stats = await fs.stat(filePath);
-          return {
-            file,
-            mtime: stats.mtime.getTime(),
-          };
-        }),
-      );
-
-      // Sort by modification time and get the most recent
-      fileStats.sort((a, b) => b.mtime - a.mtime);
-      const latestFile = fileStats[0].file;
-
-      // Extract session ID from filename (remove .jsonl extension)
-      const sessionId = latestFile.replace('.jsonl', '');
-
-      this.logger.log(`Found latest Claude session ID: ${sessionId}`);
-      return sessionId;
-    } catch (error: any) {
-      this.logger.warn(
-        `Could not find Claude session ID: ${error.message}. Using placeholder.`,
-      );
-      // Return a placeholder if we can't find the session ID
-      return `session-${Date.now()}`;
-    }
-  }
 }

@@ -408,7 +408,6 @@ export class CodeService {
       let analysisText = '';
       let messageCount = 0;
       let capturedSessionId: string | null = null;
-
       for await (const message of queryGenerator) {
         messageCount++;
         console.log(`\n=== Message ${messageCount} ===`);

@@ -21,6 +21,7 @@ export class ImprovedTicketResponseDto {
   estimatedEffort?: 'small' | 'medium' | 'large' | 'extra-large';
   potentialRisks?: string[];
   labels?: string[];
+  formattedDescription?: string; // JIRA wiki markup formatted version
 }
 
 export class BatchImproveTicketsDto {

@@ -12,6 +12,12 @@ import { EnvHandling } from '../git/entities/worktree.entity';
 import { WorktreeResponseDto } from '../git/dto/worktree.dto';
 import { GitRepository, GitProvider } from '../git/entities/git-repository.entity';
 import { HappyContextBuilder } from '../code/happy-context.builder';
+import { WorkVerificationService } from './work-verification.service';
+import { VerificationResult } from './entities/verification-result.entity';
+import { VerificationResolutionService } from './verification-resolution.service';
+import { StartVerificationResolutionDto, VerificationResolutionStatusDto } from './dto/verification-resolution.dto';
+import { IntegrationTestingService } from './integration-testing.service';
+import { IntegrationTestResult } from './entities/integration-test-result.entity';
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { randomUUID } from 'crypto';
@@ -28,7 +34,10 @@ export class TicketWorkflowService {
     private readonly jiraTicketService: JiraTicketService,
     private readonly worktreeService: WorktreeService,
     private readonly projectsService: ProjectsService,
+    private readonly verificationService: WorkVerificationService,
     private readonly happyContextBuilder: HappyContextBuilder,
+    private readonly verificationResolutionService: VerificationResolutionService,
+    private readonly integrationTestingService: IntegrationTestingService,
   ) {}
 
   /**
@@ -627,6 +636,278 @@ export class TicketWorkflowService {
       resumeCommands,
       metadata: workflow.happySessionMetadata,
     };
+  }
+
+  /**
+   * Verify the work done in a ticket's worktree
+   */
+  async verifyWork(
+    ticketId: string,
+    customInstructions?: string,
+  ): Promise<any> {
+    const workflow = await this.getByTicketId(ticketId);
+
+    if (!workflow) {
+      throw new NotFoundException(`Workflow for ticket ${ticketId} not found`);
+    }
+
+    // Check if verification is already running
+    if (workflow.status === WorkflowStatus.VERIFYING) {
+      return {
+        status: 'already_running',
+        message: 'Verification is already in progress',
+      };
+    }
+
+    // Update workflow status to verifying
+    workflow.status = WorkflowStatus.VERIFYING;
+    await this.workflowRepository.save(workflow);
+
+    // Start verification in background
+    this.runVerificationInBackground(ticketId, workflow, customInstructions).catch((error) => {
+      console.error('Background verification failed:', error);
+      // Update status back to development_complete on failure
+      workflow.status = WorkflowStatus.DEVELOPMENT_COMPLETE;
+      this.workflowRepository.save(workflow);
+    });
+
+    // Return immediately
+    return {
+      status: 'processing',
+      message: 'Verification started in background. It may take a few minutes.',
+    };
+  }
+
+  /**
+   * Run verification in background (similar to preliminary analysis)
+   */
+  private async runVerificationInBackground(
+    ticketId: string,
+    workflow: TicketWorkflow,
+    customInstructions?: string,
+  ): Promise<void> {
+    console.log(`\n=== Running verification for ticket ${ticketId} in background ===`);
+    console.log('Starting at:', new Date().toISOString());
+
+    try {
+      // Run the actual verification
+      const result = await this.verificationService.verifyWork(ticketId, customInstructions);
+
+      // Update workflow status to verification_complete
+      workflow.status = WorkflowStatus.VERIFICATION_COMPLETE;
+      await this.workflowRepository.save(workflow);
+
+      console.log(`\n=== Verification Complete for ticket ${ticketId} ===`);
+      console.log('Completed at:', new Date().toISOString());
+    } catch (error: any) {
+      console.error(`\n=== Verification Failed for ticket ${ticketId} ===`);
+      console.error('Failed at:', new Date().toISOString());
+      console.error('Error:', error.message);
+
+      // Update workflow status back to development_complete on error
+      workflow.status = WorkflowStatus.DEVELOPMENT_COMPLETE;
+      await this.workflowRepository.save(workflow);
+
+      throw error;
+    }
+  }
+
+  /**
+   * Get the latest verification result for a ticket
+   */
+  async getLatestVerification(ticketId: string): Promise<VerificationResult | null> {
+    return this.verificationService.getLatestVerification(ticketId);
+  }
+
+  /**
+   * Add review notes to a verification
+   */
+  async addVerificationReviewNotes(
+    verificationId: string,
+    notes: string,
+    reviewedBy: string,
+  ): Promise<VerificationResult> {
+    return this.verificationService.addReviewNotes(verificationId, notes, reviewedBy);
+  }
+
+  /**
+   * Approve ticket for PR creation after verification
+   */
+  async approveForPR(ticketId: string): Promise<void> {
+    const workflow = await this.getByTicketId(ticketId);
+
+    if (!workflow) {
+      throw new NotFoundException(`Workflow for ticket ${ticketId} not found`);
+    }
+
+    if (workflow.status !== WorkflowStatus.VERIFICATION_COMPLETE) {
+      throw new BadRequestException(
+        `Cannot approve for PR. Current status: ${workflow.status}. Expected: ${WorkflowStatus.VERIFICATION_COMPLETE}`,
+      );
+    }
+
+    await this.verificationService.approveForPR(ticketId);
+  }
+
+  /**
+   * Start verification resolution session
+   */
+  async startVerificationResolution(
+    ticketId: string,
+    dto: StartVerificationResolutionDto,
+  ): Promise<TicketWorkflow & { resumeCommands: { cd: string; happy: string } }> {
+    return this.verificationResolutionService.startResolution(ticketId, dto);
+  }
+
+  /**
+   * Stop verification resolution session
+   */
+  async stopVerificationResolution(ticketId: string): Promise<TicketWorkflow> {
+    return this.verificationResolutionService.stopResolution(ticketId);
+  }
+
+  /**
+   * Complete verification resolution
+   */
+  async completeVerificationResolution(
+    ticketId: string,
+    completionNotes?: string,
+  ): Promise<TicketWorkflow> {
+    return this.verificationResolutionService.completeResolution(ticketId, completionNotes);
+  }
+
+  /**
+   * Get verification resolution status
+   */
+  async getVerificationResolutionStatus(
+    ticketId: string,
+  ): Promise<VerificationResolutionStatusDto> {
+    return this.verificationResolutionService.getResolutionStatus(ticketId);
+  }
+
+  /**
+   * Trigger re-verification after resolution
+   */
+  async triggerReVerification(ticketId: string): Promise<VerificationResult> {
+    // First complete the resolution if not already done
+    const workflow = await this.getByTicketId(ticketId);
+    if (!workflow) {
+      throw new NotFoundException(`Workflow for ticket ${ticketId} not found`);
+    }
+
+    // Update status to verifying
+    workflow.status = WorkflowStatus.VERIFYING;
+    await this.workflowRepository.save(workflow);
+
+    // Run verification again
+    return this.verificationService.verifyWork(ticketId);
+  }
+
+  /**
+   * Run integration tests for a ticket
+   */
+  async runIntegrationTest(
+    ticketId: string,
+    customInstructions?: string,
+  ): Promise<any> {
+    const workflow = await this.getByTicketId(ticketId);
+
+    if (!workflow) {
+      throw new NotFoundException(`Workflow for ticket ${ticketId} not found`);
+    }
+
+    // Check if testing is already running
+    if (workflow.status === WorkflowStatus.TESTING_IN_PROGRESS) {
+      return {
+        status: 'already_running',
+        message: 'Integration testing is already in progress',
+      };
+    }
+
+    // Update workflow status to testing
+    workflow.status = WorkflowStatus.TESTING_IN_PROGRESS;
+    await this.workflowRepository.save(workflow);
+
+    // Start testing in background
+    this.runTestingInBackground(ticketId, workflow, customInstructions).catch((error) => {
+      console.error('Background integration testing failed:', error);
+      // Update status back to verification_complete on failure
+      workflow.status = WorkflowStatus.VERIFICATION_COMPLETE;
+      this.workflowRepository.save(workflow);
+    });
+
+    // Return immediately
+    return {
+      status: 'processing',
+      message: 'Integration testing started in background. It may take a few minutes.',
+    };
+  }
+
+  /**
+   * Run integration testing in background
+   */
+  private async runTestingInBackground(
+    ticketId: string,
+    workflow: TicketWorkflow,
+    customInstructions?: string,
+  ): Promise<void> {
+    console.log(`\n=== Running integration tests for ticket ${ticketId} in background ===`);
+    console.log('Starting at:', new Date().toISOString());
+
+    try {
+      // Run the actual testing
+      const result = await this.integrationTestingService.runIntegrationTests(
+        ticketId,
+        customInstructions,
+      );
+
+      // Update workflow status based on results
+      // Status is already updated by the integration testing service
+
+      console.log(`\n=== Integration Testing Complete for ticket ${ticketId} ===`);
+      console.log('Completed at:', new Date().toISOString());
+    } catch (error: any) {
+      console.error(`Background integration testing failed for ticket ${ticketId}:`, error);
+
+      // Update workflow status to error
+      workflow.status = WorkflowStatus.TESTING_FAILED;
+      workflow.metadata = {
+        ...workflow.metadata,
+        testingError: `Integration testing failed: ${error.message}`,
+        testingErrorAt: new Date(),
+      };
+      await this.workflowRepository.save(workflow);
+
+      throw error;
+    }
+  }
+
+  /**
+   * Get latest integration test results
+   */
+  async getLatestTestResults(ticketId: string): Promise<IntegrationTestResult | null> {
+    return this.integrationTestingService.getLatestTestResults(ticketId);
+  }
+
+  /**
+   * Get integration test history
+   */
+  async getTestHistory(ticketId: string, limit: number = 10): Promise<IntegrationTestResult[]> {
+    return this.integrationTestingService.getTestHistory(ticketId);
+  }
+
+  /**
+   * Mark tests as needing fixes
+   */
+  async markTestsNeedFix(ticketId: string, issues: string): Promise<void> {
+    return this.integrationTestingService.markTestsNeedFix(ticketId, issues);
+  }
+
+  /**
+   * Approve integration tests
+   */
+  async approveIntegrationTests(ticketId: string): Promise<void> {
+    return this.integrationTestingService.approveTests(ticketId);
   }
 
 }

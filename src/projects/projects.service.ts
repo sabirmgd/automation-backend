@@ -1,8 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, FindManyOptions, Like } from 'typeorm';
+import { Repository, FindManyOptions, Like, QueryFailedError } from 'typeorm';
 import { Project } from './project.entity';
 
 @Injectable()
@@ -13,8 +13,44 @@ export class ProjectsService {
   ) {}
 
   async create(createProjectDto: CreateProjectDto) {
-    const project = this.projectRepository.create(createProjectDto);
-    return await this.projectRepository.save(project);
+    // Clean up the DTO - convert empty strings to null/undefined
+    const cleanedDto = { ...createProjectDto };
+
+    // Convert empty strings to null for optional unique fields
+    if (cleanedDto.key === '' || cleanedDto.key === null) {
+      delete cleanedDto.key; // Remove the key entirely if it's empty
+    }
+
+    // If a key is provided, check if it's unique
+    if (cleanedDto.key) {
+      const existingProject = await this.projectRepository.findOne({
+        where: { key: cleanedDto.key }
+      });
+
+      if (existingProject) {
+        throw new ConflictException(
+          `A project with key "${cleanedDto.key}" already exists. Please use a unique key.`
+        );
+      }
+    }
+
+    try {
+      const project = this.projectRepository.create(cleanedDto);
+      return await this.projectRepository.save(project);
+    } catch (error) {
+      // Handle database constraint violations
+      if (error instanceof QueryFailedError) {
+        if (error.message.includes('duplicate key value violates unique constraint')) {
+          if (error.message.includes('UQ_63e67599567b2126cfef14e1474')) {
+            throw new ConflictException(
+              'A project with this key already exists. Please use a unique key.'
+            );
+          }
+          throw new ConflictException('A project with these values already exists.');
+        }
+      }
+      throw error;
+    }
   }
 
   async findAll(

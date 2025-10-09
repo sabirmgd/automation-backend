@@ -52,6 +52,11 @@ export class JiraTicketController {
     return this.jiraTicketService.update(id, updateJiraTicketDto);
   }
 
+  @Patch(':id/toggle-hidden')
+  toggleHidden(@Param('id') id: string): Promise<JiraTicket> {
+    return this.jiraTicketService.toggleHidden(id);
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   remove(@Param('id') id: string): Promise<void> {

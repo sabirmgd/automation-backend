@@ -18,6 +18,17 @@ export enum WorkflowStatus {
   BRANCH_GENERATED = 'branch_generated',
   WORKTREE_CREATED = 'worktree_created',
   DEVELOPMENT = 'development',
+  DEVELOPMENT_COMPLETE = 'development_complete',
+  VERIFYING = 'verifying',
+  VERIFICATION_COMPLETE = 'verification_complete',
+  VERIFICATION_RESOLUTION_IN_PROGRESS = 'verification_resolution_in_progress',
+  VERIFICATION_RESOLUTION_COMPLETE = 'verification_resolution_complete',
+  TESTING_IN_PROGRESS = 'testing_in_progress',
+  TESTING_COMPLETE = 'testing_complete',
+  TESTING_PARTIAL = 'testing_partial',
+  TESTING_FAILED = 'testing_failed',
+  TESTING_NEEDS_FIX = 'testing_needs_fix',
+  READY_FOR_PR = 'ready_for_pr',
   PR_CREATED = 'pr_created',
   IN_REVIEW = 'in_review',
   COMPLETED = 'completed',
@@ -97,6 +108,22 @@ export class TicketWorkflow {
     startedAt?: Date;
     stoppedAt?: Date;
     status?: 'running' | 'stopped' | 'crashed' | 'context_sent';
+    additionalInstructions?: string;
+    initialResponse?: string;
+  };
+
+  // Verification Resolution phase
+  @Column({ type: 'varchar', nullable: true })
+  verificationResolutionSessionId: string;
+
+  @Column({ type: 'jsonb', nullable: true })
+  verificationResolutionMetadata: {
+    mode?: 'context' | 'implementation';
+    startedAt?: Date;
+    completedAt?: Date;
+    verificationId?: string;
+    resolutionNotes?: string;
+    status?: 'not_started' | 'context_sent' | 'in_progress' | 'completed';
     additionalInstructions?: string;
     initialResponse?: string;
   };

@@ -24,6 +24,7 @@ import { TicketAnalysisController } from './controllers/ticket-analysis.controll
 import { HiddenCommentController } from './controllers/hidden-comment.controller';
 import { TicketImproverController } from './controllers/ticket-improver.controller';
 import { JiraImproverAgentService } from '../../agents/jira-improver/agent.service';
+import { JiraFormatterService } from '../../agents/jira-improver/services/jira-formatter.service';
 import { EncryptionService } from '../../common/services/encryption.service';
 
 @Module({
@@ -56,6 +57,7 @@ import { EncryptionService } from '../../common/services/encryption.service';
     JiraBoardService,
     HiddenCommentService,
     JiraImproverAgentService,
+    JiraFormatterService,
     EncryptionService,
   ],
   exports: [

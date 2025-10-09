@@ -84,6 +84,14 @@ export class JiraTicketService {
       queryBuilder.andWhere('ticket.priority = :priority', { priority: filter.priority });
     }
 
+    // Filter hidden tickets unless explicitly requested
+    if (!filter?.includeHidden) {
+      console.log('Excluding hidden tickets');
+      queryBuilder.andWhere('ticket.isHidden = :isHidden', { isHidden: false });
+    } else {
+      console.log('Including hidden tickets');
+    }
+
     const sql = queryBuilder.getSql();
     console.log('Generated SQL query:', sql);
 
@@ -145,6 +153,12 @@ export class JiraTicketService {
   async update(id: string, updateDto: UpdateJiraTicketDto): Promise<JiraTicket> {
     const ticket = await this.findOne(id);
     Object.assign(ticket, updateDto);
+    return await this.jiraTicketRepository.save(ticket);
+  }
+
+  async toggleHidden(id: string): Promise<JiraTicket> {
+    const ticket = await this.findOne(id);
+    ticket.isHidden = !ticket.isHidden;
     return await this.jiraTicketRepository.save(ticket);
   }
 

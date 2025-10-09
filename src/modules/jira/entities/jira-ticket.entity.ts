@@ -130,6 +130,9 @@ export class JiraTicket {
   @Column({ nullable: true })
   lastSyncedAt: Date;
 
+  @Column({ default: false })
+  isHidden: boolean;
+
   @CreateDateColumn()
   createdAt: Date;
 

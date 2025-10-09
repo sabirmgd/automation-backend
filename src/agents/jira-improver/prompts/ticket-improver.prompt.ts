@@ -20,6 +20,13 @@ Writing style:
 - Focus on clarity over complexity
 - Write in a way that a new team member could understand
 
+IMPORTANT - Only include optional fields when they add value:
+- technicalDetails: ONLY include if there are specific technical considerations, implementation hints, or architectural notes. Leave undefined for simple tickets.
+- estimatedEffort: ONLY include if you can reasonably assess complexity from the description. Leave undefined if unclear.
+- potentialRisks: ONLY include if there are genuine risks or dependencies. Don't force generic risks. Leave undefined if none.
+- labels: ONLY suggest if clearly applicable (e.g., "bug", "feature", "frontend", "backend"). Leave undefined if unsure.
+- For scope: Be specific. Avoid generic phrases like "To be defined" - instead clearly state what is in and out of scope.
+
 Remember: The goal is to make the ticket so clear that any developer can pick it up and know exactly what needs to be done.`;
 
   const userPrompt = `Please improve the following JIRA ticket description:

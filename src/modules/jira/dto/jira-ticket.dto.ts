@@ -1,4 +1,4 @@
-import { IsString, IsOptional, IsUUID, IsArray, IsNumber, IsObject, IsDateString } from 'class-validator';
+import { IsString, IsOptional, IsUUID, IsArray, IsNumber, IsObject, IsDateString, IsBoolean } from 'class-validator';
 
 export class CreateJiraTicketDto {
   @IsString()
@@ -127,4 +127,8 @@ export class TicketFilterDto {
   @IsOptional()
   @IsString()
   priority?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  includeHidden?: boolean;
 }

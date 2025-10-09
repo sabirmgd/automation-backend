@@ -26,8 +26,9 @@ interface CreateRemoteRequest {
 interface ImportRequest {
   projectId: string;
   provider: GitProvider;
-  owner: string;
-  repoName: string;
+  owner?: string;  // Now optional - will auto-detect from token if not provided
+  repoName?: string;  // Optional if githubUrl is provided
+  githubUrl?: string;  // Can provide full GitHub URL instead of owner/repoName
   credentialId?: string;
 }
 
@@ -70,11 +71,28 @@ export class GitController {
 
   @Post('import')
   import(@Body() body: ImportRequest) {
+    let owner = body.owner || '';
+    let repoName = body.repoName || '';
+
+    // Parse GitHub URL if provided
+    if (body.githubUrl) {
+      const urlPattern = /github\.com[/:]([\w-]+)\/([\w.-]+)/;
+      const match = body.githubUrl.match(urlPattern);
+      if (match) {
+        owner = match[1];
+        repoName = match[2].replace(/\.git$/, ''); // Remove .git extension if present
+      }
+    }
+
+    if (!repoName) {
+      throw new Error('Repository name is required (either as repoName or in githubUrl)');
+    }
+
     return this.gitService.importRepository(
       body.projectId,
       body.provider,
-      body.owner,
-      body.repoName,
+      owner,
+      repoName,
       body.credentialId
     );
   }

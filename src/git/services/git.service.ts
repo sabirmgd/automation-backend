@@ -133,6 +133,15 @@ export class GitService {
     }
 
     const gitProvider = this.getProvider(provider);
+
+    // Auto-detect owner if not provided or empty
+    if (!owner || owner.trim() === '') {
+      console.log('[GitService] No owner provided, auto-detecting from credentials...');
+      const userInfo = await gitProvider.getUserInfo(credential);
+      owner = userInfo.username;
+      console.log(`[GitService] Auto-detected owner: ${owner}`);
+    }
+
     const remoteRepo = await gitProvider.getRepository(owner, repoName, credential);
 
     // Check if repository is already imported

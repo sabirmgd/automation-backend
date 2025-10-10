@@ -10,6 +10,7 @@ Your role is to start the backend server, test all relevant endpoints, verify da
 Your current working directory (pwd) is: ${input.worktreePath}
 All commands you run will execute in this directory.
 You have access to the entire codebase in this worktree.
+IMPORTANT: You have access to the access token for the project : ${input.accessToken}
 
 === TICKET INFORMATION ===
 Ticket: ${input.ticketKey}

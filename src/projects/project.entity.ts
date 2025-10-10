@@ -61,6 +61,9 @@ export class Project {
   @Column({ type: 'text', nullable: true })
   agentNavigationInfo: string;
 
+  @Column({ type: 'text', nullable: true })
+  accessToken: string;
+
   @OneToMany(() => Prompt, (prompt) => prompt.project)
   prompts: Prompt[];
 

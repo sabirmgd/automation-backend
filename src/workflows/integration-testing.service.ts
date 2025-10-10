@@ -82,6 +82,7 @@ export class IntegrationTestingService {
 
       // Run integration tests
       const report = await this.testingAgent.runIntegrationTests({
+        accessToken: workflow.project?.accessToken,
         worktreePath: worktree.worktreePath,
         ticketKey: ticket.key,
         ticketDescription: `${ticket.summary}\n\n${ticket.description || ''}`,

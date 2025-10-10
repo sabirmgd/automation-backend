@@ -3,6 +3,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import { integrationTestPrompt } from './prompts/integration-test.prompt';
 
 export interface TestingInput {
+  accessToken?: string;
   worktreePath: string;
   ticketKey: string;
   ticketDescription: string;

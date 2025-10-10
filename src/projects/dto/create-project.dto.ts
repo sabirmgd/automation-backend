@@ -89,4 +89,9 @@ export class CreateProjectDto {
   @IsString()
   @MaxLength(5000)
   agentNavigationInfo?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  accessToken?: string;
 }
